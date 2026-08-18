@@ -122,7 +122,7 @@ public final class BranchFork {
     }
 
     private static String databaseName(String currentBranch) {
-        String readableBranch = currentBranch.replaceAll("[^a-zA-Z0-9_.-]", "-").toLowerCase();
+        String readableBranch = currentBranch.replaceAll("[^a-zA-Z0-9_.-]", "_").toLowerCase();
         String readablePrefix = readableBranch.length() > 40 ? readableBranch.substring(0, 40) : readableBranch;
         String suffix = StableId.of("branch", currentBranch).value().substring("branch_".length(), "branch_".length() + 8);
         return "branch_" + readablePrefix + "_" + suffix;
