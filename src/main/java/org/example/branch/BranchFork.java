@@ -10,19 +10,18 @@ import java.util.regex.Pattern;
 /** Creates a branch database in one persistent PostgreSQL Docker container. */
 public final class BranchFork {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
-    private static final String SHARED_CONTAINER_NAME = "branch-fork-postgres";
     private static final int READY_ATTEMPTS = 20;
 
     private final CommandRunner commandRunner;
     private final PostgresDockerConfig config;
 
     public BranchFork() {
-        this(new ProcessCommandRunner(), PostgresDockerConfig.localDefault());
+        this(new ProcessCommandRunner());
     }
 
-    public BranchFork(CommandRunner commandRunner, PostgresDockerConfig config) {
+    public BranchFork(CommandRunner commandRunner) {
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
-        this.config = Objects.requireNonNull(config, "config must not be null");
+        this.config = PostgresDockerConfig.getInstance();
     }
 
     public BranchForkResult fork(String fromBranch, String currentBranch) {
@@ -37,33 +36,33 @@ public final class BranchFork {
         runChecked("initialize branch metadata", postgresCommand(databaseName, metadataSql(fromBranch, currentBranch)));
         out("Recorded fork from '" + fromBranch + "' to '" + currentBranch + "' in database '" + databaseName + "'.");
         out("Branch fork completed for '" + currentBranch + "'.");
-        return new BranchForkResult(fromBranch, currentBranch, SHARED_CONTAINER_NAME, databaseName);
+        return new BranchForkResult(fromBranch, currentBranch, config.containerName(), databaseName);
     }
 
     private void ensureSharedContainer() {
-        CommandResult inspect = run(List.of("docker", "inspect", "--format", "{{.State.Running}}", SHARED_CONTAINER_NAME),
+        CommandResult inspect = run(List.of("docker", "inspect", "--format", "{{.State.Running}}", config.containerName()),
                 "inspect shared PostgreSQL container", false);
         if (inspect.succeeded() && inspect.output().equals("true")) {
-            out("Reusing shared PostgreSQL container '" + SHARED_CONTAINER_NAME + "'.");
+            out("Reusing shared PostgreSQL container '" + config.containerName() + "'.");
             return;
         }
 
-        out("Starting shared PostgreSQL container '" + SHARED_CONTAINER_NAME + "'.");
+        out("Starting shared PostgreSQL container '" + config.containerName() + "'.");
         runChecked("start shared PostgreSQL container", List.of(
-                "docker", "run", "--detach", "--name", SHARED_CONTAINER_NAME,
+                "docker", "run", "--detach", "--name", config.containerName(),
                 "--env", "POSTGRES_USER=" + config.user(),
                 "--env", "POSTGRES_PASSWORD=" + config.password(),
-                "--env", "POSTGRES_DB=postgres",
+                "--env", "POSTGRES_DB=" + config.adminDatabase(),
                 config.image()
         ));
     }
 
     private void waitUntilReady() {
-        out("Waiting for shared PostgreSQL container '" + SHARED_CONTAINER_NAME + "' to accept connections.");
-        List<String> command = List.of("docker", "exec", SHARED_CONTAINER_NAME, "pg_isready", "-U", config.user(), "-d", "postgres");
+        out("Waiting for shared PostgreSQL container '" + config.containerName() + "' to accept connections.");
+        List<String> command = List.of("docker", "exec", config.containerName(), "pg_isready", "-U", config.user(), "-d", config.adminDatabase());
         for (int attempt = 1; attempt <= READY_ATTEMPTS; attempt++) {
             if (run(command, "check PostgreSQL readiness", false).succeeded()) {
-                out("Shared PostgreSQL container '" + SHARED_CONTAINER_NAME + "' is ready.");
+                out("Shared PostgreSQL container '" + config.containerName() + "' is ready.");
                 return;
             }
             if (attempt < READY_ATTEMPTS) {
@@ -74,7 +73,7 @@ public final class BranchFork {
     }
 
     private List<String> postgresCommand(String databaseName, String sql) {
-        return List.of("docker", "exec", SHARED_CONTAINER_NAME, "psql", "-U", config.user(), "-d", databaseName,
+        return List.of("docker", "exec", config.containerName(), "psql", "-U", config.user(), "-d", databaseName,
                 "-v", "ON_ERROR_STOP=1", "-c", sql);
     }
 

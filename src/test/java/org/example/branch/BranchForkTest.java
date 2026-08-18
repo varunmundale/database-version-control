@@ -18,18 +18,18 @@ class BranchForkTest {
                 new CommandResult(0, "accepting connections"), new CommandResult(0, "CREATE DATABASE"),
                 new CommandResult(0, "INSERT 0 1")
         );
-        BranchFork branchFork = new BranchFork(runner, PostgresDockerConfig.localDefault());
+        BranchFork branchFork = new BranchFork(runner);
 
         BranchForkResult result = branchFork.fork("main", "feature/orders");
 
         assertEquals("main", result.fromBranch());
         assertEquals("feature/orders", result.currentBranch());
-        assertEquals("branch-fork-postgres", result.containerName());
+            assertEquals("postgres-branches-scratchpad", result.containerName());
         assertTrue(result.databaseName().startsWith("branch_feature-orders_"));
         assertEquals(5, runner.commands.size());
-        assertEquals(List.of("docker", "inspect", "--format", "{{.State.Running}}", "branch-fork-postgres"), runner.commands.getFirst());
-        assertEquals(List.of("docker", "run", "--detach", "--name", "branch-fork-postgres"), runner.commands.get(1).subList(0, 5));
-        assertEquals(List.of("docker", "exec", "branch-fork-postgres", "pg_isready", "-U", "postgres", "-d", "postgres"), runner.commands.get(2));
+            assertEquals(List.of("docker", "inspect", "--format", "{{.State.Running}}", "postgres-branches-scratchpad"), runner.commands.getFirst());
+            assertEquals(List.of("docker", "run", "--detach", "--name", "postgres-branches-scratchpad"), runner.commands.get(1).subList(0, 5));
+            assertEquals(List.of("docker", "exec", "postgres-branches-scratchpad", "pg_isready", "-U", "postgres", "-d", "postgres"), runner.commands.get(2));
         assertEquals("CREATE DATABASE " + result.databaseName(), runner.commands.get(3).getLast());
         assertTrue(runner.commands.get(4).getLast().contains("VALUES ('feature/orders', 'main')"));
     }
@@ -37,7 +37,7 @@ class BranchForkTest {
     @Test
     void surfacesDockerFailures() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(1, "No such container"), new CommandResult(125, "docker daemon is unavailable"));
-        BranchFork branchFork = new BranchFork(runner, PostgresDockerConfig.localDefault());
+        BranchFork branchFork = new BranchFork(runner);
 
         BranchForkException exception = assertThrows(BranchForkException.class, () -> branchFork.fork("main", "feature/orders"));
 
@@ -50,11 +50,11 @@ class BranchForkTest {
                 new CommandResult(0, "true"), new CommandResult(0, "accepting connections"),
                 new CommandResult(0, "CREATE DATABASE"), new CommandResult(0, "INSERT 0 1")
         );
-        BranchFork branchFork = new BranchFork(runner, PostgresDockerConfig.localDefault());
+        BranchFork branchFork = new BranchFork(runner);
 
         BranchForkResult result = branchFork.fork("main", "feature/payments");
 
-        assertEquals("branch-fork-postgres", result.containerName());
+        assertEquals("postgres-branches-scratchpad", result.containerName());
         assertEquals(4, runner.commands.size());
         assertTrue(runner.commands.stream().noneMatch(command -> command.contains("run")));
         assertEquals("CREATE DATABASE " + result.databaseName(), runner.commands.get(2).getLast());

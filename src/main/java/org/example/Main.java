@@ -1,15 +1,12 @@
 package org.example;
 
-import org.example.toygit.Commit;
-import org.example.toygit.ToyGit;
+import org.example.dbgit.DbGitService;
 
-import java.util.Map;
+import java.nio.file.Path;
 
 public class Main {
-    static void main() {
-        Commit initial = new Commit("initial", Map.of("readme.md", "Hello\n"));
-        Commit updated = new Commit("updated", Map.of("readme.md", "Hello, Toy Git!\n"));
-
-        ToyGit.diff(initial, updated).forEach(IO::println);
+    public static void main(String[] args) {
+        DbGitService dbGitService = new DbGitService(Path.of("."));
+        dbGitService.execute(String.join(" ", args));
     }
 }
