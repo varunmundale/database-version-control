@@ -3,6 +3,7 @@ package org.example.dbgit;
 import org.example.branch.BranchDatabase;
 import org.example.branch.BranchFork;
 import org.example.branch.BranchMetadataStore;
+import org.example.branch.ChangeSet;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
 import org.example.branch.PostgresConnectorFactory;
@@ -98,6 +99,20 @@ class DbGitClientTest {
         assertTrue(errBytes.toString(StandardCharsets.UTF_8).contains("dbService is not running"));
     }
 
+    @Test
+    void sendsAMultilineDdlStatementAndReportsTheRecordedChangeset() {
+        DbGitClient client = new DbGitClient(server.port());
+        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+
+        int exitCode = client.runAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);", printStream(outBytes), printStream(errBytes));
+
+        assertEquals(0, exitCode);
+        assertEquals("Recorded changeset for branch 'main': table 'orders' now has 1 column(s)." + System.lineSeparator(),
+                outBytes.toString(StandardCharsets.UTF_8));
+        assertEquals("", errBytes.toString(StandardCharsets.UTF_8));
+    }
+
     private static PrintStream printStream(ByteArrayOutputStream bytes) {
         return new PrintStream(bytes, true, StandardCharsets.UTF_8);
     }
@@ -126,7 +141,7 @@ class DbGitClientTest {
 
                 @Override
                 public DatabaseSchema inspectSchema() {
-                    throw new UnsupportedOperationException();
+                    return new DatabaseSchema("postgresql", "public", List.of());
                 }
 
                 @Override
@@ -157,6 +172,15 @@ class DbGitClientTest {
         @Override
         public void recordDatabases(String branch, List<BranchDatabase> databases) {
             databasesByBranch.put(branch, databases);
+        }
+
+        @Override
+        public void recordChangeset(ChangeSet changeset) {
+        }
+
+        @Override
+        public List<String> changesetsForBranch(String branch) {
+            return List.of();
         }
     }
 }

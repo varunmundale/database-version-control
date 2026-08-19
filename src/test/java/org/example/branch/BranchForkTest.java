@@ -101,6 +101,24 @@ class BranchForkTest {
     }
 
     @Test
+    void defaultDatabaseNameIsTheAdminDatabaseForMainAndAForkedCopyForOtherBranches() {
+        BranchFork branchFork = new BranchFork(new RecordingRunner(), new RecordingConnectorFactory(), new FakeMetadataStore());
+
+        assertEquals("postgres", branchFork.defaultDatabaseName("main"));
+        assertEquals("feature_orders_postgres", branchFork.defaultDatabaseName("feature/orders"));
+    }
+
+    @Test
+    void connectDelegatesToTheConnectorFactory() throws Exception {
+        RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
+        BranchFork branchFork = new BranchFork(new RecordingRunner(), connectorFactory, new FakeMetadataStore());
+
+        branchFork.connect("feature_orders_postgres").close();
+
+        assertEquals(List.of("feature_orders_postgres"), connectorFactory.connections);
+    }
+
+    @Test
     void refusesToForkWhenTheBranchAlreadyExists() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         FakeMetadataStore metadataStore = new FakeMetadataStore();
@@ -163,6 +181,15 @@ class BranchForkTest {
         public void recordDatabases(String branch, List<BranchDatabase> databases) {
             recordDatabasesCalls.add(new Object[] {branch, databases});
             databasesByBranch.put(branch, databases);
+        }
+
+        @Override
+        public void recordChangeset(ChangeSet changeset) {
+        }
+
+        @Override
+        public List<String> changesetsForBranch(String branch) {
+            return List.of();
         }
     }
 

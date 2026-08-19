@@ -13,4 +13,9 @@ public interface BranchMetadataStore {
     List<BranchDatabase> databasesForBranch(String branch);
 
     void recordDatabases(String branch, List<BranchDatabase> databases);
+
+    void recordChangeset(ChangeSet changeset);
+
+    /** Raw DDL statements previously recorded for a branch, in the order they were applied. */
+    List<String> changesetsForBranch(String branch);
 }

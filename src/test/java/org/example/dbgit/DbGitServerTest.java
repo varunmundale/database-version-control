@@ -3,6 +3,7 @@ package org.example.dbgit;
 import org.example.branch.BranchDatabase;
 import org.example.branch.BranchFork;
 import org.example.branch.BranchMetadataStore;
+import org.example.branch.ChangeSet;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
 import org.example.branch.PostgresConnectorFactory;
@@ -82,22 +83,47 @@ class DbGitServerTest {
         assertTrue(response.body.get(0).contains("Unknown branch"));
     }
 
+    @Test
+    void appliesAMultilineDdlStatementAndRecordsAChangesetOverTheSocket() throws IOException {
+        Response response = sendAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);");
+
+        assertEquals("OK", response.status);
+        assertEquals(List.of("Recorded changeset for branch 'main': table 'orders' now has 1 column(s)."), response.body);
+    }
+
     private Response send(String commandLine) throws IOException {
         try (Socket socket = new Socket("localhost", server.port())) {
             try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
                 writer.println(commandLine);
                 socket.shutdownOutput();
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-                String status = reader.readLine();
-                List<String> body = new ArrayList<>();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    body.add(line);
-                }
-                return new Response(status, body);
+                return readResponse(socket);
             }
         }
+    }
+
+    private Response sendAdd(String ddl) throws IOException {
+        try (Socket socket = new Socket("localhost", server.port())) {
+            try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println("dbgit add");
+                writer.print(ddl);
+                writer.flush();
+                socket.shutdownOutput();
+
+                return readResponse(socket);
+            }
+        }
+    }
+
+    private static Response readResponse(Socket socket) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+        String status = reader.readLine();
+        List<String> body = new ArrayList<>();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            body.add(line);
+        }
+        return new Response(status, body);
     }
 
     private record Response(String status, List<String> body) {
@@ -127,7 +153,7 @@ class DbGitServerTest {
 
                 @Override
                 public DatabaseSchema inspectSchema() {
-                    throw new UnsupportedOperationException();
+                    return new DatabaseSchema("postgresql", "public", List.of());
                 }
 
                 @Override
@@ -158,6 +184,15 @@ class DbGitServerTest {
         @Override
         public void recordDatabases(String branch, List<BranchDatabase> databases) {
             databasesByBranch.put(branch, databases);
+        }
+
+        @Override
+        public void recordChangeset(ChangeSet changeset) {
+        }
+
+        @Override
+        public List<String> changesetsForBranch(String branch) {
+            return List.of();
         }
     }
 }

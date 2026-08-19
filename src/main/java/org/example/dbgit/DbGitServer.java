@@ -14,6 +14,8 @@ import java.util.Objects;
 
 /** Listens on a local TCP socket and runs each incoming command line through a {@link DbGitService}. */
 public final class DbGitServer implements Closeable {
+    private static final String ADD_COMMAND = "dbgit add";
+
     private final DbGitService dbGitService;
     private final ServerSocket serverSocket;
 
@@ -59,7 +61,9 @@ public final class DbGitServer implements Closeable {
                 return;
             }
             try {
-                DbGitCommandResult result = dbGitService.execute(commandLine);
+                DbGitCommandResult result = commandLine.trim().equals(ADD_COMMAND)
+                        ? dbGitService.add(readRemaining(reader))
+                        : dbGitService.execute(commandLine);
                 writer.println("OK");
                 result.lines().forEach(writer::println);
             } catch (RuntimeException exception) {
@@ -67,5 +71,18 @@ public final class DbGitServer implements Closeable {
                 writer.println(exception.getMessage());
             }
         }
+    }
+
+    /** Reads the multiline DDL body that follows a {@code dbgit add} header line, up to the client's EOF. */
+    private static String readRemaining(BufferedReader reader) throws IOException {
+        StringBuilder body = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (!body.isEmpty()) {
+                body.append(System.lineSeparator());
+            }
+            body.append(line);
+        }
+        return body.toString();
     }
 }

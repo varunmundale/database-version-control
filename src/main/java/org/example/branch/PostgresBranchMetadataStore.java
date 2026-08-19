@@ -68,6 +68,21 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
         execute(sql.toString());
     }
 
+    @Override
+    public void recordChangeset(ChangeSet changeset) {
+        ensureSchema();
+        execute("INSERT INTO branch_changesets (branch_name, ddl, applied_at) VALUES ("
+                + quote(changeset.branch()) + ", " + quote(changeset.ddl()) + ", " + quote(changeset.appliedAt().toString()) + ")");
+    }
+
+    @Override
+    public List<String> changesetsForBranch(String branch) {
+        ensureSchema();
+        SqlExecutionResult result = execute("SELECT ddl FROM branch_changesets WHERE branch_name = "
+                + quote(branch) + " ORDER BY id");
+        return result.rows().stream().map(row -> String.valueOf(row.get("ddl"))).toList();
+    }
+
     private void ensureDatabaseExists() {
         try (SqlConnector connector = connectorFactory.connect(adminDatabase)) {
             SqlExecutionResult result = connector.execute("SELECT 1 FROM pg_database WHERE datname = " + quote(database));
@@ -86,6 +101,9 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
                 + "branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
                 + "logical_name TEXT NOT NULL, database_name TEXT NOT NULL, "
                 + "PRIMARY KEY (branch_name, logical_name)); "
+                + "CREATE TABLE IF NOT EXISTS branch_changesets ("
+                + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
+                + "ddl TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL); "
                 + "INSERT INTO branch_metadata (branch_name, forked_from) VALUES (" + quote(DEFAULT_BRANCH) + ", NULL) "
                 + "ON CONFLICT (branch_name) DO NOTHING;");
     }

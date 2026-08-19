@@ -24,21 +24,37 @@ public final class DbGitClient {
 
     public int run(List<String> args, PrintStream out, PrintStream err) {
         String commandLine = "dbgit " + String.join(" ", args);
-        try (Socket socket = new Socket("localhost", port)) {
-            try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
-                writer.println(commandLine);
-                socket.shutdownOutput();
+        return send(socket -> {
+            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            writer.println(commandLine);
+            socket.shutdownOutput();
+        }, out, err);
+    }
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-                String status = reader.readLine();
-                String line;
-                boolean ok = "OK".equals(status);
-                PrintStream destination = ok ? out : err;
-                while ((line = reader.readLine()) != null) {
-                    destination.println(line);
-                }
-                return ok ? 0 : 1;
+    /** Sends a {@code dbgit add} DDL statement, which may span multiple lines. */
+    public int runAdd(String ddl, PrintStream out, PrintStream err) {
+        return send(socket -> {
+            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            writer.println("dbgit add");
+            writer.print(ddl);
+            writer.flush();
+            socket.shutdownOutput();
+        }, out, err);
+    }
+
+    private int send(SocketRequest request, PrintStream out, PrintStream err) {
+        try (Socket socket = new Socket("localhost", port)) {
+            request.writeTo(socket);
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            String status = reader.readLine();
+            String line;
+            boolean ok = "OK".equals(status);
+            PrintStream destination = ok ? out : err;
+            while ((line = reader.readLine()) != null) {
+                destination.println(line);
             }
+            return ok ? 0 : 1;
         } catch (ConnectException exception) {
             err.println("dbService is not running. Start it first, e.g.: ./dbService");
             return 1;
@@ -46,5 +62,10 @@ public final class DbGitClient {
             err.println("Could not communicate with dbService: " + exception.getMessage());
             return 1;
         }
+    }
+
+    @FunctionalInterface
+    private interface SocketRequest {
+        void writeTo(Socket socket) throws IOException;
     }
 }

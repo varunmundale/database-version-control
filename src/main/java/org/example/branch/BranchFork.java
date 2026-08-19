@@ -16,6 +16,7 @@ public final class BranchFork {
     private static final int CONTAINER_PORT = 5432;
     private static final int READY_ATTEMPTS = 20;
     private static final String POSTGRES_LOGICAL_NAME = "postgres";
+    private static final String DEFAULT_BRANCH = "main";
 
     private final CommandRunner commandRunner;
     private final PostgresDockerConfig config;
@@ -43,6 +44,18 @@ public final class BranchFork {
 
     public BranchMetadataStore metadataStore() {
         return metadataStore;
+    }
+
+    /** The database a branch's own DDL is applied against: the shared admin database for {@code main}, its forked copy otherwise. */
+    public String defaultDatabaseName(String branch) {
+        if (branch.equals(DEFAULT_BRANCH)) {
+            return config.adminDatabase();
+        }
+        return sanitizeBranchName(branch) + "_" + POSTGRES_LOGICAL_NAME;
+    }
+
+    public SqlConnector connect(String database) throws SQLException {
+        return connectorFactory.connect(database);
     }
 
     public BranchForkResult fork(String fromBranch, String currentBranch) {

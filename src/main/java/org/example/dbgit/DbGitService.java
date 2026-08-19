@@ -1,18 +1,30 @@
 package org.example.dbgit;
 
 import org.example.branch.BranchFork;
+import org.example.branch.BranchMetadataStore;
+import org.example.branch.ChangeSet;
+import org.example.database.SqlConnector;
+import org.example.schema.DdlStatementParser;
+import org.example.schema.TableModel;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.sql.SQLException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
-/** Command service supporting {@code dbgit checkout} and {@code dbgit branch}. */
+/** Command service supporting {@code dbgit checkout}, {@code dbgit branch} and {@code dbgit add}. */
 public final class DbGitService {
+    private static final String SCHEMA = "public";
+
     private final DbGitRepository repository;
     private final BranchFork branchFork;
+    private final DdlStatementParser ddlParser = new DdlStatementParser();
 
     public DbGitService(Path workingDirectory) {
         this(workingDirectory, new BranchFork());
@@ -40,10 +52,49 @@ public final class DbGitService {
             if (arguments.size() == 3 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("checkout")) {
                 return checkout(arguments.get(2));
             }
-            throw new IllegalArgumentException("Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch");
+            throw new IllegalArgumentException("Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add");
         } catch (IOException exception) {
             throw new IllegalStateException("Could not update local .dbgit state", exception);
         }
+    }
+
+    public DbGitCommandResult add(String ddl) {
+        Objects.requireNonNull(ddl, "ddl must not be null");
+        String statement = ddl.strip();
+        if (statement.isEmpty()) {
+            throw new IllegalArgumentException("Usage: dbgit add <DDL statement>");
+        }
+        try {
+            String branch = repository.currentBranch();
+            BranchMetadataStore metadataStore = branchFork.metadataStore();
+
+            String tableName = ddlParser.tableName(statement);
+            Map<String, TableModel> internalSchema = replay(metadataStore.changesetsForBranch(branch));
+            TableModel updated = ddlParser.apply(SCHEMA, statement, internalSchema.get(tableName));
+
+            String database = branchFork.defaultDatabaseName(branch);
+            try (SqlConnector connector = branchFork.connect(database)) {
+                connector.execute(statement);
+            } catch (SQLException exception) {
+                throw new IllegalStateException("Could not apply DDL to database '" + database + "': " + exception.getMessage(), exception);
+            }
+
+            metadataStore.recordChangeset(new ChangeSet(branch, statement, Instant.now()));
+            return print(List.of("Recorded changeset for branch '" + branch + "': table '" + updated.name() + "' now has "
+                    + updated.columns().size() + " column(s)."));
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not update local .dbgit state", exception);
+        }
+    }
+
+    /** Rebuilds the branch's internal schema representation by replaying its previously recorded DDL statements. */
+    private Map<String, TableModel> replay(List<String> priorStatements) {
+        Map<String, TableModel> schema = new LinkedHashMap<>();
+        for (String priorStatement : priorStatements) {
+            String tableName = ddlParser.tableName(priorStatement);
+            schema.put(tableName, ddlParser.apply(SCHEMA, priorStatement, schema.get(tableName)));
+        }
+        return schema;
     }
 
     private DbGitCommandResult createAndCheckout(String branch) throws IOException {
