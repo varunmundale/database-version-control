@@ -42,7 +42,7 @@ class BranchForkTest {
         assertEquals(1, connectorFactory.executed.size());
         assertEquals("postgres", connectorFactory.executed.get(0)[0]);
         assertEquals("CREATE DATABASE \"feature_orders_postgres\"", connectorFactory.executed.get(0)[1]);
-        assertTrue(metadataStore.stagedChangesets.isEmpty());
+        assertTrue(metadataStore.commitHistory("feature/orders").isEmpty());
     }
 
     @Test
@@ -73,7 +73,7 @@ class BranchForkTest {
     }
 
     @Test
-    void recreatesTheBranchDatabaseByReplayingTheParentsCommitHistory() {
+    void recreatesTheBranchDatabaseByReplayingTheSharedCommitHistory() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         FakeMetadataStore metadataStore = new FakeMetadataStore();
@@ -94,13 +94,8 @@ class BranchForkTest {
         assertEquals("feature_orders_postgres", connectorFactory.executed.get(2)[0]);
         assertEquals("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;", connectorFactory.executed.get(2)[1]);
 
-        assertEquals(2, metadataStore.stagedChangesets.size());
-        assertEquals("feature/orders", metadataStore.stagedChangesets.get(0)[0]);
-        assertEquals("CREATE TABLE orders (id INT PRIMARY KEY);", metadataStore.stagedChangesets.get(0)[1]);
-        assertEquals("feature/orders", metadataStore.stagedChangesets.get(1)[0]);
-        assertEquals("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;", metadataStore.stagedChangesets.get(1)[1]);
-        assertEquals(2, metadataStore.markAppliedCalls.size());
-        assertEquals(2, metadataStore.commitCalls.size());
+        // No new commits or changesets are created for the fork - the branch just points at the same commit history.
+        assertEquals(metadataStore.commitHistory("main"), metadataStore.commitHistory("feature/orders"));
     }
 
     @Test
@@ -150,13 +145,11 @@ class BranchForkTest {
         }
     }
 
+    /** A branch is just a name pointing at a commit; forking copies that pointer rather than creating new commits. */
     private static final class FakeMetadataStore implements BranchMetadataStore {
         private final Set<String> branches = new LinkedHashSet<>();
         private final Map<String, List<ChangeSet>> commitHistoryByBranch = new HashMap<>();
         private final List<String[]> createBranchCalls = new ArrayList<>();
-        private final List<Object[]> stagedChangesets = new ArrayList<>();
-        private final List<Long> markAppliedCalls = new ArrayList<>();
-        private final List<Object[]> commitCalls = new ArrayList<>();
         private long nextId = 100;
 
         void seedBranch(String branch) {
@@ -179,18 +172,20 @@ class BranchForkTest {
         @Override
         public boolean createBranch(String branchName, String forkedFrom) {
             createBranchCalls.add(new String[] {branchName, forkedFrom});
-            return branches.add(branchName);
+            boolean added = branches.add(branchName);
+            if (added && forkedFrom != null) {
+                commitHistoryByBranch.put(branchName, commitHistoryByBranch.getOrDefault(forkedFrom, List.of()));
+            }
+            return added;
         }
 
         @Override
         public long stageChangeset(String branch, String ddl) {
-            stagedChangesets.add(new Object[] {branch, ddl});
             return nextId++;
         }
 
         @Override
         public void markApplied(long changesetId) {
-            markAppliedCalls.add(changesetId);
         }
 
         @Override
@@ -205,7 +200,6 @@ class BranchForkTest {
 
         @Override
         public long commit(String branch, List<Long> changesetIds) {
-            commitCalls.add(new Object[] {branch, changesetIds});
             return nextId++;
         }
     }

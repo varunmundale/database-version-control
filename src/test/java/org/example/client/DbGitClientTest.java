@@ -175,7 +175,11 @@ class DbGitClientTest {
 
         @Override
         public boolean createBranch(String branchName, String forkedFrom) {
-            return branches.add(branchName);
+            boolean added = branches.add(branchName);
+            if (added && forkedFrom != null) {
+                headCommitByBranch.put(branchName, headCommitByBranch.get(forkedFrom));
+            }
+            return added;
         }
 
         @Override

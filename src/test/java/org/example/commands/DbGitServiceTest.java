@@ -141,6 +141,22 @@ class DbGitServiceTest {
         assertEquals(List.of("Nothing to commit for branch 'main'."), result.lines());
     }
 
+    @Test
+    void forkedBranchesSharePriorCommitHistoryWithoutCreatingNewCommits() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        service.execute("dbgit commit");
+
+        service.execute("dbgit checkout -b feature/orders");
+
+        List<ChangeSet> mainHistory = metadataStore.commitHistory("main");
+        List<ChangeSet> featureHistory = metadataStore.commitHistory("feature/orders");
+        assertEquals(1, mainHistory.size());
+        assertEquals(mainHistory, featureHistory);
+    }
+
     private static final class RecordingRunner implements CommandRunner {
         private final List<CommandResult> results;
         private final List<List<String>> commands = new ArrayList<>();
@@ -219,7 +235,11 @@ class DbGitServiceTest {
 
         @Override
         public boolean createBranch(String branchName, String forkedFrom) {
-            return branches.add(branchName);
+            boolean added = branches.add(branchName);
+            if (added && forkedFrom != null) {
+                headCommitByBranch.put(branchName, headCommitByBranch.get(forkedFrom));
+            }
+            return added;
         }
 
         @Override

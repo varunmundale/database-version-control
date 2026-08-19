@@ -75,13 +75,10 @@ public final class BranchFork {
         out("Creating database '" + database + "' for branch '" + currentBranch + "'.");
         executeSql("create branch database", config.adminDatabase(), "CREATE DATABASE \"" + database + "\"");
 
-        List<ChangeSet> history = metadataStore.commitHistory(fromBranch);
-        out("Recreating branch '" + currentBranch + "' from " + history.size() + " committed changeset(s) in '" + fromBranch + "'.");
+        List<ChangeSet> history = metadataStore.commitHistory(currentBranch);
+        out("Recreating branch '" + currentBranch + "' from " + history.size() + " committed changeset(s) shared with '" + fromBranch + "'.");
         for (ChangeSet changeset : history) {
             executeSql("replay changeset #" + changeset.id(), database, changeset.ddl());
-            long newChangesetId = metadataStore.stageChangeset(currentBranch, changeset.ddl());
-            metadataStore.markApplied(newChangesetId);
-            metadataStore.commit(currentBranch, List.of(newChangesetId));
         }
 
         out("Branch fork completed for '" + currentBranch + "'.");

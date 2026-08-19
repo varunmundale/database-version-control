@@ -38,9 +38,13 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
     @Override
     public boolean createBranch(String branchName, String forkedFrom) {
         ensureSchema();
-        String forkedFromValue = forkedFrom == null ? "NULL" : quote(forkedFrom);
-        SqlExecutionResult result = execute("INSERT INTO branch_metadata (branch_name, forked_from) VALUES ("
-                + quote(branchName) + ", " + forkedFromValue + ") ON CONFLICT (branch_name) DO NOTHING");
+        SqlExecutionResult result = forkedFrom == null
+                ? execute("INSERT INTO branch_metadata (branch_name, forked_from) VALUES ("
+                        + quote(branchName) + ", NULL) ON CONFLICT (branch_name) DO NOTHING")
+                : execute("INSERT INTO branch_metadata (branch_name, forked_from, head_commit_id) "
+                        + "SELECT " + quote(branchName) + ", " + quote(forkedFrom) + ", head_commit_id "
+                        + "FROM branch_metadata WHERE branch_name = " + quote(forkedFrom)
+                        + " ON CONFLICT (branch_name) DO NOTHING");
         return result.updateCount() > 0;
     }
 
@@ -87,8 +91,8 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
         }
         ensureSchema();
         Long headCommitId = headCommitId(branch);
-        SqlExecutionResult insertResult = execute("INSERT INTO branch_commits (branch_name, parent_commit_id) VALUES ("
-                + quote(branch) + ", " + (headCommitId == null ? "NULL" : headCommitId) + ") RETURNING id");
+        SqlExecutionResult insertResult = execute("INSERT INTO branch_commits (parent_commit_id) VALUES ("
+                + (headCommitId == null ? "NULL" : headCommitId) + ") RETURNING id");
         long commitId = id(insertResult);
 
         StringBuilder sql = new StringBuilder();
@@ -124,12 +128,12 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
     }
 
     private void ensureSchema() {
-        execute("CREATE TABLE IF NOT EXISTS branch_metadata ("
-                + "branch_name TEXT PRIMARY KEY, forked_from TEXT, head_commit_id BIGINT, "
-                + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
-                + "CREATE TABLE IF NOT EXISTS branch_commits ("
-                + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
+        execute("CREATE TABLE IF NOT EXISTS branch_commits ("
+                + "id BIGSERIAL PRIMARY KEY, "
                 + "parent_commit_id BIGINT REFERENCES branch_commits(id), next_commit_id BIGINT REFERENCES branch_commits(id), "
+                + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
+                + "CREATE TABLE IF NOT EXISTS branch_metadata ("
+                + "branch_name TEXT PRIMARY KEY, forked_from TEXT, head_commit_id BIGINT REFERENCES branch_commits(id), "
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
                 + "CREATE TABLE IF NOT EXISTS branch_changesets ("
                 + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
