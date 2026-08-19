@@ -8,6 +8,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class H2ConnectorTest {
@@ -29,6 +30,21 @@ class H2ConnectorTest {
                     Map.of("ID", 1, "NAME", "Ada Lovelace"),
                     Map.of("ID", 2, "NAME", "Grace")
             ), query.rows());
+        }
+    }
+
+    @Test
+    void rowsWithNullColumnsDoNotThrow() throws SQLException {
+        try (H2Connector database = H2Connector.inMemory("connector_test_nulls")) {
+            database.execute("CREATE TABLE people (id INT PRIMARY KEY, name VARCHAR(100))");
+            database.execute("INSERT INTO people (id, name) VALUES (1, NULL)");
+
+            SqlExecutionResult query = database.execute("SELECT id, name FROM people");
+
+            Map<String, Object> row = query.rows().getFirst();
+            assertEquals(1, row.get("ID"));
+            assertTrue(row.containsKey("NAME"));
+            assertNull(row.get("NAME"));
         }
     }
 }

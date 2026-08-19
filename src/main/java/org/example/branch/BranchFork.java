@@ -5,12 +5,11 @@ import org.example.database.SqlConnector;
 
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** Forks a branch's databases, as copies, into one persistent PostgreSQL Docker container. */
+/** Forks a branch's database into one persistent PostgreSQL Docker container, recreating it from the parent's commit history. */
 public final class BranchFork {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
     private static final int CONTAINER_PORT = 5432;
@@ -69,31 +68,21 @@ public final class BranchFork {
         ensureSharedContainer();
         waitUntilReady();
 
-        String branchPrefix = sanitizeBranchName(currentBranch);
-        List<BranchDatabase> forkedDatabases = new ArrayList<>();
-        forkedDatabases.add(forkDatabase(branchPrefix, POSTGRES_LOGICAL_NAME, config.adminDatabase(), currentBranch));
+        String database = defaultDatabaseName(currentBranch);
+        out("Creating database '" + database + "' for branch '" + currentBranch + "'.");
+        executeSql("create branch database", config.adminDatabase(), "CREATE DATABASE \"" + database + "\"");
 
-        List<BranchDatabase> trackedDatabases = metadataStore.databasesForBranch(fromBranch);
-        List<BranchDatabase> forkedTrackedDatabases = new ArrayList<>();
-        for (BranchDatabase parentDatabase : trackedDatabases) {
-            BranchDatabase forked = forkDatabase(branchPrefix, parentDatabase.logicalName(), parentDatabase.databaseName(), currentBranch);
-            forkedDatabases.add(forked);
-            forkedTrackedDatabases.add(forked);
+        List<ChangeSet> history = metadataStore.commitHistory(fromBranch);
+        out("Recreating branch '" + currentBranch + "' from " + history.size() + " committed changeset(s) in '" + fromBranch + "'.");
+        for (ChangeSet changeset : history) {
+            executeSql("replay changeset #" + changeset.id(), database, changeset.ddl());
+            long newChangesetId = metadataStore.stageChangeset(currentBranch, changeset.ddl());
+            metadataStore.markApplied(newChangesetId);
+            metadataStore.commit(currentBranch, List.of(newChangesetId));
         }
 
-        metadataStore.recordDatabases(currentBranch, forkedTrackedDatabases);
-        out("Recorded branch '" + currentBranch + "' forked from '" + fromBranch + "' with " + forkedDatabases.size() + " database(s).");
         out("Branch fork completed for '" + currentBranch + "'.");
-        return new BranchForkResult(fromBranch, currentBranch, config.containerName(),
-                forkedDatabases.stream().map(BranchDatabase::databaseName).toList());
-    }
-
-    private BranchDatabase forkDatabase(String branchPrefix, String logicalName, String parentDatabaseName, String currentBranch) {
-        String childDatabaseName = branchPrefix + "_" + logicalName;
-        out("Forking database '" + parentDatabaseName + "' into '" + childDatabaseName + "' for branch '" + currentBranch + "'.");
-        executeSql("fork database '" + logicalName + "'", config.adminDatabase(),
-                "CREATE DATABASE \"" + childDatabaseName + "\" WITH TEMPLATE \"" + parentDatabaseName + "\"");
-        return new BranchDatabase(logicalName, childDatabaseName);
+        return new BranchForkResult(fromBranch, currentBranch, config.containerName(), database);
     }
 
     private void ensureSharedContainer() {

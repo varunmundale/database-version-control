@@ -2,7 +2,7 @@ package org.example.branch;
 
 import java.util.List;
 
-/** The source of truth for which branches exist and which databases each one owns. */
+/** The source of truth for which branches exist and their changeset/commit history. */
 public interface BranchMetadataStore {
     /** All known branches, {@code main} always included. */
     List<String> branches();
@@ -10,12 +10,22 @@ public interface BranchMetadataStore {
     /** Atomically claims a branch name. Returns {@code false} if the branch already existed. */
     boolean createBranch(String branchName, String forkedFrom);
 
-    List<BranchDatabase> databasesForBranch(String branch);
+    /** Stages a raw DDL statement for a branch with status PENDING. Returns the new changeset's id. */
+    long stageChangeset(String branch, String ddl);
 
-    void recordDatabases(String branch, List<BranchDatabase> databases);
+    /** Transitions a staged changeset from PENDING to APPLIED, once it has run successfully against the database. */
+    void markApplied(long changesetId);
 
-    void recordChangeset(ChangeSet changeset);
+    /** Every changeset staged for a branch, in the order they were staged, regardless of status. */
+    List<ChangeSet> changesetsForBranch(String branch);
 
-    /** Raw DDL statements previously recorded for a branch, in the order they were applied. */
-    List<String> changesetsForBranch(String branch);
+    /** The branch's committed changesets, walked from the root commit to its current HEAD. */
+    List<ChangeSet> commitHistory(String branch);
+
+    /**
+     * Folds the given APPLIED changesets into one new commit, chained after the branch's current HEAD commit
+     * (updating both the new commit's backward pointer and the previous HEAD's forward pointer). Changesets not
+     * currently APPLIED are silently skipped. Returns the new commit's id.
+     */
+    long commit(String branch, List<Long> changesetIds);
 }

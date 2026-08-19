@@ -1,9 +1,9 @@
 package org.example.dbgit;
 
-import org.example.branch.BranchDatabase;
 import org.example.branch.BranchFork;
 import org.example.branch.BranchMetadataStore;
 import org.example.branch.ChangeSet;
+import org.example.branch.ChangesetStatus;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
 import org.example.branch.PostgresConnectorFactory;
@@ -23,10 +23,16 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,7 +94,7 @@ class DbGitServerTest {
         Response response = sendAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);");
 
         assertEquals("OK", response.status);
-        assertEquals(List.of("Recorded changeset for branch 'main': table 'orders' now has 1 column(s)."), response.body);
+        assertEquals(List.of("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)."), response.body);
     }
 
     private Response send(String commandLine) throws IOException {
@@ -164,35 +170,75 @@ class DbGitServerTest {
     }
 
     private static final class InMemoryMetadataStore implements BranchMetadataStore {
-        private final Map<String, List<BranchDatabase>> databasesByBranch = new TreeMap<>(Map.of("main", List.of()));
+        private final TreeSet<String> branches = new TreeSet<>(Set.of("main"));
+        private final Map<Long, ChangeSet> changesetsById = new LinkedHashMap<>();
+        private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
+        private final Map<Long, Long> parentCommitById = new HashMap<>();
+        private final Map<String, Long> headCommitByBranch = new HashMap<>();
+        private final AtomicLong nextChangesetId = new AtomicLong(1);
+        private final AtomicLong nextCommitId = new AtomicLong(1);
 
         @Override
         public List<String> branches() {
-            return List.copyOf(databasesByBranch.keySet());
+            return List.copyOf(branches);
         }
 
         @Override
         public boolean createBranch(String branchName, String forkedFrom) {
-            return databasesByBranch.putIfAbsent(branchName, List.of()) == null;
+            return branches.add(branchName);
         }
 
         @Override
-        public List<BranchDatabase> databasesForBranch(String branch) {
-            return databasesByBranch.getOrDefault(branch, List.of());
+        public long stageChangeset(String branch, String ddl) {
+            long id = nextChangesetId.getAndIncrement();
+            changesetsById.put(id, new ChangeSet(id, branch, ddl, ChangesetStatus.PENDING, Instant.now()));
+            return id;
         }
 
         @Override
-        public void recordDatabases(String branch, List<BranchDatabase> databases) {
-            databasesByBranch.put(branch, databases);
+        public void markApplied(long changesetId) {
+            ChangeSet changeset = changesetsById.get(changesetId);
+            changesetsById.put(changesetId,
+                    new ChangeSet(changeset.id(), changeset.branch(), changeset.ddl(), ChangesetStatus.APPLIED, changeset.appliedAt()));
         }
 
         @Override
-        public void recordChangeset(ChangeSet changeset) {
+        public List<ChangeSet> changesetsForBranch(String branch) {
+            return changesetsById.values().stream().filter(changeset -> changeset.branch().equals(branch)).toList();
         }
 
         @Override
-        public List<String> changesetsForBranch(String branch) {
-            return List.of();
+        public List<ChangeSet> commitHistory(String branch) {
+            List<Long> chain = new ArrayList<>();
+            Long current = headCommitByBranch.get(branch);
+            while (current != null) {
+                chain.add(current);
+                current = parentCommitById.get(current);
+            }
+            Collections.reverse(chain);
+            List<ChangeSet> history = new ArrayList<>();
+            for (long commitId : chain) {
+                for (long changesetId : changesetIdsByCommit.getOrDefault(commitId, List.of())) {
+                    history.add(changesetsById.get(changesetId));
+                }
+            }
+            return history;
+        }
+
+        @Override
+        public long commit(String branch, List<Long> changesetIds) {
+            List<Long> applied = changesetIds.stream()
+                    .filter(id -> changesetsById.get(id).status() == ChangesetStatus.APPLIED)
+                    .toList();
+            long commitId = nextCommitId.getAndIncrement();
+            parentCommitById.put(commitId, headCommitByBranch.get(branch));
+            headCommitByBranch.put(branch, commitId);
+            changesetIdsByCommit.put(commitId, applied);
+            for (long id : applied) {
+                ChangeSet changeset = changesetsById.get(id);
+                changesetsById.put(id, new ChangeSet(changeset.id(), changeset.branch(), changeset.ddl(), ChangesetStatus.COMMIT, changeset.appliedAt()));
+            }
+            return commitId;
         }
     }
 }

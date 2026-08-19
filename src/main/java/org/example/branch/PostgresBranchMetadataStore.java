@@ -4,12 +4,15 @@ import org.example.database.SqlConnector;
 import org.example.database.SqlExecutionResult;
 
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
-/** Stores branch and database fork metadata in a standalone PostgreSQL server, separate from the per-branch databases themselves. */
+/** Stores branch, changeset and commit metadata in a standalone PostgreSQL server, separate from the branch databases themselves. */
 public final class PostgresBranchMetadataStore implements BranchMetadataStore {
     private static final String DEFAULT_BRANCH = "main";
 
@@ -41,46 +44,71 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
     }
 
     @Override
-    public List<BranchDatabase> databasesForBranch(String branch) {
+    public long stageChangeset(String branch, String ddl) {
         ensureSchema();
-        SqlExecutionResult result = execute("SELECT logical_name, database_name FROM branch_databases WHERE branch_name = "
-                + quote(branch) + " ORDER BY logical_name");
-        List<BranchDatabase> databases = new ArrayList<>();
-        for (Map<String, Object> row : result.rows()) {
-            databases.add(new BranchDatabase(String.valueOf(row.get("logical_name")), String.valueOf(row.get("database_name"))));
-        }
-        return databases;
+        SqlExecutionResult result = execute("INSERT INTO branch_changesets (branch_name, ddl, status) VALUES ("
+                + quote(branch) + ", " + quote(ddl) + ", 'PENDING') RETURNING id");
+        return id(result);
     }
 
     @Override
-    public void recordDatabases(String branch, List<BranchDatabase> databases) {
-        if (databases.isEmpty()) {
-            return;
-        }
+    public void markApplied(long changesetId) {
         ensureSchema();
-        StringBuilder sql = new StringBuilder();
-        for (BranchDatabase database : databases) {
-            sql.append("INSERT INTO branch_databases (branch_name, logical_name, database_name) VALUES (")
-                    .append(quote(branch)).append(", ").append(quote(database.logicalName())).append(", ")
-                    .append(quote(database.databaseName()))
-                    .append(") ON CONFLICT (branch_name, logical_name) DO UPDATE SET database_name = EXCLUDED.database_name; ");
-        }
-        execute(sql.toString());
+        execute("UPDATE branch_changesets SET status = 'APPLIED' WHERE id = " + changesetId);
     }
 
     @Override
-    public void recordChangeset(ChangeSet changeset) {
+    public List<ChangeSet> changesetsForBranch(String branch) {
         ensureSchema();
-        execute("INSERT INTO branch_changesets (branch_name, ddl, applied_at) VALUES ("
-                + quote(changeset.branch()) + ", " + quote(changeset.ddl()) + ", " + quote(changeset.appliedAt().toString()) + ")");
-    }
-
-    @Override
-    public List<String> changesetsForBranch(String branch) {
-        ensureSchema();
-        SqlExecutionResult result = execute("SELECT ddl FROM branch_changesets WHERE branch_name = "
+        SqlExecutionResult result = execute("SELECT id, ddl, status, applied_at FROM branch_changesets WHERE branch_name = "
                 + quote(branch) + " ORDER BY id");
-        return result.rows().stream().map(row -> String.valueOf(row.get("ddl"))).toList();
+        return toChangesets(branch, result);
+    }
+
+    @Override
+    public List<ChangeSet> commitHistory(String branch) {
+        ensureSchema();
+        SqlExecutionResult result = execute("WITH RECURSIVE chain AS ("
+                + "SELECT id, parent_commit_id, 0 AS depth FROM branch_commits "
+                + "WHERE id = (SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch) + ") "
+                + "UNION ALL "
+                + "SELECT c.id, c.parent_commit_id, chain.depth + 1 FROM branch_commits c JOIN chain ON c.id = chain.parent_commit_id"
+                + ") SELECT bc.id, bc.ddl, bc.status, bc.applied_at FROM branch_changesets bc "
+                + "JOIN chain ON bc.commit_id = chain.id "
+                + "ORDER BY chain.depth DESC, bc.id ASC");
+        return toChangesets(branch, result);
+    }
+
+    @Override
+    public long commit(String branch, List<Long> changesetIds) {
+        if (changesetIds.isEmpty()) {
+            throw new BranchForkException("No applied changesets to commit for branch '" + branch + "'.");
+        }
+        ensureSchema();
+        Long headCommitId = headCommitId(branch);
+        SqlExecutionResult insertResult = execute("INSERT INTO branch_commits (branch_name, parent_commit_id) VALUES ("
+                + quote(branch) + ", " + (headCommitId == null ? "NULL" : headCommitId) + ") RETURNING id");
+        long commitId = id(insertResult);
+
+        StringBuilder sql = new StringBuilder();
+        if (headCommitId != null) {
+            sql.append("UPDATE branch_commits SET next_commit_id = ").append(commitId).append(" WHERE id = ").append(headCommitId).append("; ");
+        }
+        sql.append("UPDATE branch_metadata SET head_commit_id = ").append(commitId).append(" WHERE branch_name = ").append(quote(branch)).append("; ");
+        String ids = changesetIds.stream().map(String::valueOf).collect(Collectors.joining(", "));
+        sql.append("UPDATE branch_changesets SET status = 'COMMIT', commit_id = ").append(commitId)
+                .append(" WHERE id IN (").append(ids).append(") AND status = 'APPLIED';");
+        execute(sql.toString());
+        return commitId;
+    }
+
+    private Long headCommitId(String branch) {
+        SqlExecutionResult result = execute("SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch));
+        if (result == null || result.rows().isEmpty()) {
+            return null;
+        }
+        Object value = result.rows().getFirst().get("head_commit_id");
+        return value == null ? null : ((Number) value).longValue();
     }
 
     private void ensureDatabaseExists() {
@@ -96,16 +124,42 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
 
     private void ensureSchema() {
         execute("CREATE TABLE IF NOT EXISTS branch_metadata ("
-                + "branch_name TEXT PRIMARY KEY, forked_from TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
-                + "CREATE TABLE IF NOT EXISTS branch_databases ("
-                + "branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
-                + "logical_name TEXT NOT NULL, database_name TEXT NOT NULL, "
-                + "PRIMARY KEY (branch_name, logical_name)); "
+                + "branch_name TEXT PRIMARY KEY, forked_from TEXT, head_commit_id BIGINT, "
+                + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
+                + "CREATE TABLE IF NOT EXISTS branch_commits ("
+                + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
+                + "parent_commit_id BIGINT REFERENCES branch_commits(id), next_commit_id BIGINT REFERENCES branch_commits(id), "
+                + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
                 + "CREATE TABLE IF NOT EXISTS branch_changesets ("
                 + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
-                + "ddl TEXT NOT NULL, applied_at TIMESTAMPTZ NOT NULL); "
+                + "ddl TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING', commit_id BIGINT REFERENCES branch_commits(id), "
+                + "applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
                 + "INSERT INTO branch_metadata (branch_name, forked_from) VALUES (" + quote(DEFAULT_BRANCH) + ", NULL) "
                 + "ON CONFLICT (branch_name) DO NOTHING;");
+    }
+
+    private static long id(SqlExecutionResult result) {
+        return ((Number) result.rows().getFirst().get("id")).longValue();
+    }
+
+    private static List<ChangeSet> toChangesets(String branch, SqlExecutionResult result) {
+        List<ChangeSet> changesets = new ArrayList<>();
+        for (Map<String, Object> row : result.rows()) {
+            changesets.add(new ChangeSet(
+                    ((Number) row.get("id")).longValue(),
+                    branch,
+                    String.valueOf(row.get("ddl")),
+                    ChangesetStatus.valueOf(String.valueOf(row.get("status"))),
+                    toInstant(row.get("applied_at"))));
+        }
+        return changesets;
+    }
+
+    private static Instant toInstant(Object value) {
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        return Instant.parse(String.valueOf(value));
     }
 
     private SqlExecutionResult execute(String sql) {

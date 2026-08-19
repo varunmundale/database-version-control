@@ -3,6 +3,7 @@ package org.example.dbgit;
 import org.example.branch.BranchFork;
 import org.example.branch.BranchMetadataStore;
 import org.example.branch.ChangeSet;
+import org.example.branch.ChangesetStatus;
 import org.example.database.SqlConnector;
 import org.example.schema.DdlStatementParser;
 import org.example.schema.TableModel;
@@ -10,7 +11,6 @@ import org.example.schema.TableModel;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Command service supporting {@code dbgit checkout}, {@code dbgit branch} and {@code dbgit add}. */
+/** Command service supporting {@code dbgit checkout}, {@code dbgit branch}, {@code dbgit add} and {@code dbgit commit}. */
 public final class DbGitService {
     private static final String SCHEMA = "public";
 
@@ -52,7 +52,11 @@ public final class DbGitService {
             if (arguments.size() == 3 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("checkout")) {
                 return checkout(arguments.get(2));
             }
-            throw new IllegalArgumentException("Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add");
+            if (arguments.equals(List.of("dbgit", "commit"))) {
+                return commit();
+            }
+            throw new IllegalArgumentException(
+                    "Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add | dbgit commit");
         } catch (IOException exception) {
             throw new IllegalStateException("Could not update local .dbgit state", exception);
         }
@@ -72,6 +76,8 @@ public final class DbGitService {
             Map<String, TableModel> internalSchema = replay(metadataStore.changesetsForBranch(branch));
             TableModel updated = ddlParser.apply(SCHEMA, statement, internalSchema.get(tableName));
 
+            long changesetId = metadataStore.stageChangeset(branch, statement);
+
             String database = branchFork.defaultDatabaseName(branch);
             try (SqlConnector connector = branchFork.connect(database)) {
                 connector.execute(statement);
@@ -79,20 +85,38 @@ public final class DbGitService {
                 throw new IllegalStateException("Could not apply DDL to database '" + database + "': " + exception.getMessage(), exception);
             }
 
-            metadataStore.recordChangeset(new ChangeSet(branch, statement, Instant.now()));
-            return print(List.of("Recorded changeset for branch '" + branch + "': table '" + updated.name() + "' now has "
-                    + updated.columns().size() + " column(s)."));
+            metadataStore.markApplied(changesetId);
+            return print(List.of("Applied changeset #" + changesetId + " for branch '" + branch + "': table '" + updated.name()
+                    + "' now has " + updated.columns().size() + " column(s)."));
         } catch (IOException exception) {
             throw new IllegalStateException("Could not update local .dbgit state", exception);
         }
     }
 
-    /** Rebuilds the branch's internal schema representation by replaying its previously recorded DDL statements. */
-    private Map<String, TableModel> replay(List<String> priorStatements) {
+    private DbGitCommandResult commit() throws IOException {
+        String branch = repository.currentBranch();
+        BranchMetadataStore metadataStore = branchFork.metadataStore();
+        List<Long> appliedChangesetIds = metadataStore.changesetsForBranch(branch).stream()
+                .filter(changeset -> changeset.status() == ChangesetStatus.APPLIED)
+                .map(ChangeSet::id)
+                .toList();
+        if (appliedChangesetIds.isEmpty()) {
+            return print(List.of("Nothing to commit for branch '" + branch + "'."));
+        }
+        long commitId = metadataStore.commit(branch, appliedChangesetIds);
+        return print(List.of("Created commit #" + commitId + " for branch '" + branch + "' with "
+                + appliedChangesetIds.size() + " changeset(s)."));
+    }
+
+    /** Rebuilds the branch's internal schema representation by replaying its previously executed DDL statements. */
+    private Map<String, TableModel> replay(List<ChangeSet> changesets) {
         Map<String, TableModel> schema = new LinkedHashMap<>();
-        for (String priorStatement : priorStatements) {
-            String tableName = ddlParser.tableName(priorStatement);
-            schema.put(tableName, ddlParser.apply(SCHEMA, priorStatement, schema.get(tableName)));
+        for (ChangeSet changeset : changesets) {
+            if (changeset.status() != ChangesetStatus.APPLIED && changeset.status() != ChangesetStatus.COMMIT) {
+                continue;
+            }
+            String tableName = ddlParser.tableName(changeset.ddl());
+            schema.put(tableName, ddlParser.apply(SCHEMA, changeset.ddl(), schema.get(tableName)));
         }
         return schema;
     }
