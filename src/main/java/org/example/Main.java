@@ -1,12 +1,12 @@
 package org.example;
 
-import org.example.dbgit.DbGitService;
+import org.example.dbgit.DbGitClient;
 
-import java.nio.file.Path;
+import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
-        DbGitService dbGitService = new DbGitService(Path.of("."));
-        dbGitService.execute(String.join(" ", args));
+        int exitCode = new DbGitClient().run(List.of(args), System.out, System.err);
+        System.exit(exitCode);
     }
 }
