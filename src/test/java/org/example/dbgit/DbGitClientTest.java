@@ -3,6 +3,10 @@ package org.example.dbgit;
 import org.example.branch.BranchFork;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
+import org.example.branch.PostgresConnectorFactory;
+import org.example.database.SqlConnector;
+import org.example.database.SqlExecutionResult;
+import org.example.schema.DatabaseSchema;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,11 +33,8 @@ class DbGitClientTest {
 
     @BeforeEach
     void startServer() throws IOException {
-        RecordingRunner runner = new RecordingRunner(
-                new CommandResult(0, "true"), new CommandResult(0, "accepting connections"),
-                new CommandResult(0, "CREATE DATABASE"), new CommandResult(0, "INSERT 0 1")
-        );
-        DbGitService dbGitService = new DbGitService(workingDirectory, new BranchFork(runner));
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        DbGitService dbGitService = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory()));
         server = new DbGitServer(dbGitService, 0);
         serverThread = new Thread(() -> {
             try {
@@ -107,6 +108,27 @@ class DbGitClientTest {
         @Override
         public CommandResult run(List<String> command) {
             return results.removeFirst();
+        }
+    }
+
+    private static final class NoOpConnectorFactory implements PostgresConnectorFactory {
+        @Override
+        public SqlConnector connect(String database) {
+            return new SqlConnector() {
+                @Override
+                public SqlExecutionResult execute(String sql) {
+                    return new SqlExecutionResult(false, 0, List.of());
+                }
+
+                @Override
+                public DatabaseSchema inspectSchema() {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override
+                public void close() {
+                }
+            };
         }
     }
 }

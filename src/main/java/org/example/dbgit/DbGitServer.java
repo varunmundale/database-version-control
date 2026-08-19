@@ -62,7 +62,7 @@ public final class DbGitServer implements Closeable {
                 DbGitCommandResult result = dbGitService.execute(commandLine);
                 writer.println("OK");
                 result.lines().forEach(writer::println);
-            } catch (IllegalArgumentException | IllegalStateException exception) {
+            } catch (RuntimeException exception) {
                 writer.println("ERR");
                 writer.println(exception.getMessage());
             }

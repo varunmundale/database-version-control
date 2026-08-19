@@ -13,13 +13,15 @@ public final class PostgresDockerConfig {
     private final String user;
     private final String password;
     private final String adminDatabase;
+    private final int hostPort;
 
-    private PostgresDockerConfig(String containerName, String image, String user, String password, String adminDatabase) {
+    private PostgresDockerConfig(String containerName, String image, String user, String password, String adminDatabase, int hostPort) {
         this.containerName = containerName;
         this.image = image;
         this.user = user;
         this.password = password;
         this.adminDatabase = adminDatabase;
+        this.hostPort = hostPort;
     }
 
     public static PostgresDockerConfig getInstance() {
@@ -46,6 +48,10 @@ public final class PostgresDockerConfig {
         return adminDatabase;
     }
 
+    public int hostPort() {
+        return hostPort;
+    }
+
     private static PostgresDockerConfig load() {
         Properties properties = new Properties();
         try (InputStream input = PostgresDockerConfig.class.getClassLoader().getResourceAsStream("dbgit.properties")) {
@@ -61,7 +67,8 @@ public final class PostgresDockerConfig {
                 required(properties, "docker.image"),
                 required(properties, "postgres.user"),
                 required(properties, "postgres.password"),
-                required(properties, "postgres.admin-database")
+                required(properties, "postgres.admin-database"),
+                Integer.parseInt(required(properties, "postgres.host-port"))
         );
     }
 

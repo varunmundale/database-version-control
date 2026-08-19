@@ -1,8 +1,11 @@
 package org.example.branch;
 
+import org.example.database.PostgresConnector;
+import org.example.database.SqlConnector;
 import org.example.schema.StableId;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -10,18 +13,25 @@ import java.util.regex.Pattern;
 /** Creates a branch database in one persistent PostgreSQL Docker container. */
 public final class BranchFork {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
+    private static final int CONTAINER_PORT = 5432;
     private static final int READY_ATTEMPTS = 20;
 
     private final CommandRunner commandRunner;
     private final PostgresDockerConfig config;
+    private final PostgresConnectorFactory connectorFactory;
 
     public BranchFork() {
         this(new ProcessCommandRunner());
     }
 
     public BranchFork(CommandRunner commandRunner) {
+        this(commandRunner, defaultConnectorFactory(PostgresDockerConfig.getInstance()));
+    }
+
+    public BranchFork(CommandRunner commandRunner, PostgresConnectorFactory connectorFactory) {
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
         this.config = PostgresDockerConfig.getInstance();
+        this.connectorFactory = Objects.requireNonNull(connectorFactory, "connectorFactory must not be null");
     }
 
     public BranchForkResult fork(String fromBranch, String currentBranch) {
@@ -32,8 +42,8 @@ public final class BranchFork {
         ensureSharedContainer();
         waitUntilReady();
         out("Creating database '" + databaseName + "' for branch '" + currentBranch + "'.");
-        runChecked("create branch database", postgresCommand("postgres", "CREATE DATABASE " + databaseName));
-        runChecked("initialize branch metadata", postgresCommand(databaseName, metadataSql(fromBranch, currentBranch)));
+        executeSql("create branch database", config.adminDatabase(), "CREATE DATABASE \"" + databaseName + "\"");
+        executeSql("initialize branch metadata", databaseName, metadataSql(fromBranch, currentBranch));
         out("Recorded fork from '" + fromBranch + "' to '" + currentBranch + "' in database '" + databaseName + "'.");
         out("Branch fork completed for '" + currentBranch + "'.");
         return new BranchForkResult(fromBranch, currentBranch, config.containerName(), databaseName);
@@ -50,6 +60,7 @@ public final class BranchFork {
         out("Starting shared PostgreSQL container '" + config.containerName() + "'.");
         runChecked("start shared PostgreSQL container", List.of(
                 "docker", "run", "--detach", "--name", config.containerName(),
+                "--publish", config.hostPort() + ":" + CONTAINER_PORT,
                 "--env", "POSTGRES_USER=" + config.user(),
                 "--env", "POSTGRES_PASSWORD=" + config.password(),
                 "--env", "POSTGRES_DB=" + config.adminDatabase(),
@@ -58,10 +69,9 @@ public final class BranchFork {
     }
 
     private void waitUntilReady() {
-        out("Waiting for shared PostgreSQL container '" + config.containerName() + "' to accept connections.");
-        List<String> command = List.of("docker", "exec", config.containerName(), "pg_isready", "-U", config.user(), "-d", config.adminDatabase());
+        out("Waiting for shared PostgreSQL container '" + config.containerName() + "' to accept connections on port " + config.hostPort() + ".");
         for (int attempt = 1; attempt <= READY_ATTEMPTS; attempt++) {
-            if (run(command, "check PostgreSQL readiness", false).succeeded()) {
+            if (canConnect()) {
                 out("Shared PostgreSQL container '" + config.containerName() + "' is ready.");
                 return;
             }
@@ -72,9 +82,29 @@ public final class BranchFork {
         throw fail("Shared PostgreSQL container did not become ready after " + READY_ATTEMPTS + " attempts.", null);
     }
 
-    private List<String> postgresCommand(String databaseName, String sql) {
-        return List.of("docker", "exec", config.containerName(), "psql", "-U", config.user(), "-d", databaseName,
-                "-v", "ON_ERROR_STOP=1", "-c", sql);
+    private boolean canConnect() {
+        try (SqlConnector connector = connectorFactory.connect(config.adminDatabase())) {
+            return true;
+        } catch (SQLException exception) {
+            return false;
+        }
+    }
+
+    private void executeSql(String operation, String database, String sql) {
+        try (SqlConnector connector = connectorFactory.connect(database)) {
+            connector.execute(sql);
+        } catch (SQLException exception) {
+            throw fail("Could not " + operation + ": " + exception.getMessage(), exception);
+        }
+    }
+
+    private static PostgresConnectorFactory defaultConnectorFactory(PostgresDockerConfig config) {
+        return database -> new PostgresConnector(jdbcUrl(config, database));
+    }
+
+    private static String jdbcUrl(PostgresDockerConfig config, String database) {
+        return "jdbc:postgresql://localhost:" + config.hostPort() + "/" + database
+                + "?user=" + config.user() + "&password=" + config.password();
     }
 
     private static String metadataSql(String fromBranch, String currentBranch) {
