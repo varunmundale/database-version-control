@@ -2,6 +2,7 @@ package org.example.commands;
 
 import org.example.connectors.SqlConnector;
 import org.example.adapters.DdlStatementParser;
+import org.example.adapters.SchemaDiff;
 import org.example.adapters.TableModel;
 
 import java.io.IOException;
@@ -51,8 +52,12 @@ public final class DbGitService {
             if (arguments.equals(List.of("dbgit", "commit"))) {
                 return commit();
             }
+            if (arguments.size() == 4 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("diff")) {
+                return diff(arguments.get(2), arguments.get(3));
+            }
             throw new IllegalArgumentException(
-                    "Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add | dbgit commit");
+                    "Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add | dbgit commit "
+                            + "| dbgit diff <branch1> <branch2>");
         } catch (IOException exception) {
             throw new IllegalStateException("Could not update local .dbgit state", exception);
         }
@@ -69,7 +74,7 @@ public final class DbGitService {
             BranchMetadataStore metadataStore = branchFork.metadataStore();
 
             String tableName = ddlParser.tableName(statement);
-            Map<String, TableModel> internalSchema = replay(metadataStore.changesetsForBranch(branch));
+            Map<String, TableModel> internalSchema = currentSchema(branch, metadataStore);
             TableModel updated = ddlParser.apply(SCHEMA, statement, internalSchema.get(tableName));
 
             long changesetId = metadataStore.stageChangeset(branch, statement);
@@ -104,9 +109,51 @@ public final class DbGitService {
                 + appliedChangesetIds.size() + " changeset(s)."));
     }
 
-    /** Rebuilds the branch's internal schema representation by replaying its previously executed DDL statements. */
-    private Map<String, TableModel> replay(List<ChangeSet> changesets) {
-        Map<String, TableModel> schema = new LinkedHashMap<>();
+    private DbGitCommandResult diff(String left, String right) {
+        BranchMetadataStore metadataStore = branchFork.metadataStore();
+        if (!metadataStore.branches().contains(left)) {
+            throw new IllegalArgumentException("Unknown branch: " + left);
+        }
+        if (!metadataStore.branches().contains(right)) {
+            throw new IllegalArgumentException("Unknown branch: " + right);
+        }
+
+        Map<String, TableModel> leftSchema = replay(metadataStore.commitHistory(left), new LinkedHashMap<>());
+        Map<String, TableModel> rightSchema = replay(metadataStore.commitHistory(right), new LinkedHashMap<>());
+        List<SchemaDiff.Entry> diffEntries = SchemaDiff.diff(leftSchema.values(), rightSchema.values());
+
+        if (diffEntries.isEmpty()) {
+            return print(List.of("No differences between '" + left + "' and '" + right + "'."));
+        }
+        List<String> lines = new ArrayList<>();
+        for (SchemaDiff.Entry entry : diffEntries) {
+            lines.add(marker(entry.side()) + " " + entry.description());
+        }
+        return print(lines);
+    }
+
+    private static String marker(SchemaDiff.Side side) {
+        return switch (side) {
+            case LEFT -> "<";
+            case RIGHT -> ">";
+            case CONFLICT -> "!";
+        };
+    }
+
+    /**
+     * The branch's current internal schema: its inherited/committed history (reached via the shared commit chain,
+     * regardless of which branch originally created each commit) plus its own not-yet-committed applied changesets.
+     */
+    private Map<String, TableModel> currentSchema(String branch, BranchMetadataStore metadataStore) {
+        Map<String, TableModel> schema = replay(metadataStore.commitHistory(branch), new LinkedHashMap<>());
+        List<ChangeSet> ownApplied = metadataStore.changesetsForBranch(branch).stream()
+                .filter(changeset -> changeset.status() == ChangesetStatus.APPLIED)
+                .toList();
+        return replay(ownApplied, schema);
+    }
+
+    /** Rebuilds a schema by replaying DDL statements on top of a starting point, in order. */
+    private Map<String, TableModel> replay(List<ChangeSet> changesets, Map<String, TableModel> schema) {
         for (ChangeSet changeset : changesets) {
             if (changeset.status() != ChangesetStatus.APPLIED && changeset.status() != ChangesetStatus.COMMIT) {
                 continue;

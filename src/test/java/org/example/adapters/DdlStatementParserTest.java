@@ -71,6 +71,30 @@ class DdlStatementParserTest {
     }
 
     @Test
+    void alterTableRenameColumnPreservesTypeAndAssignsANewStableId() {
+        TableModel existing = parser.apply("public", "CREATE TABLE orders (id INT PRIMARY KEY, note TEXT NOT NULL);", null);
+        ColumnModel note = existing.columns().get(1);
+
+        TableModel updated = parser.apply("public", "ALTER TABLE orders RENAME COLUMN note TO memo;", existing);
+
+        assertEquals(2, updated.columns().size());
+        ColumnModel memo = updated.columns().stream().filter(column -> column.name().equals("memo")).findFirst().orElseThrow();
+        assertEquals(StableId.of("column", existing.id().value() + ".memo"), memo.id());
+        assertEquals(note.nativeType(), memo.nativeType());
+        assertEquals(note.ordinal(), memo.ordinal());
+        assertEquals(note.nullable(), memo.nullable());
+        assertTrue(updated.columns().stream().noneMatch(column -> column.name().equals("note")));
+    }
+
+    @Test
+    void alterTableRenameColumnOnAnUnknownColumnThrows() {
+        TableModel existing = parser.apply("public", "CREATE TABLE orders (id INT PRIMARY KEY);", null);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> parser.apply("public", "ALTER TABLE orders RENAME COLUMN missing TO renamed;", existing));
+    }
+
+    @Test
     void alterTableOnAnUnknownTableThrows() {
         assertThrows(IllegalArgumentException.class,
                 () -> parser.apply("public", "ALTER TABLE orders ADD COLUMN total NUMERIC;", null));

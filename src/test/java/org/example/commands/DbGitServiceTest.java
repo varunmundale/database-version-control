@@ -142,6 +142,51 @@ class DbGitServiceTest {
     }
 
     @Test
+    void reportsNoDifferencesWhenBranchesShareTheSameCommittedSchema() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+
+        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+
+        assertEquals(List.of("No differences between 'main' and 'feature/orders'."), result.lines());
+    }
+
+    @Test
+    void diffsTwoBranchesReportingAConflictWhenBothSidesChangeTheSameColumnDifferently() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+        service.add("ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout main");
+        service.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
+        service.execute("dbgit commit");
+
+        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+
+        assertEquals(1, result.lines().size());
+        assertTrue(result.lines().getFirst().startsWith("! column orders.total"));
+    }
+
+    @Test
+    void refusesToDiffAnUnknownBranch() {
+        DbGitService service = new DbGitService(workingDirectory,
+                new BranchFork(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.execute("dbgit diff main unknown-branch"));
+
+        assertTrue(exception.getMessage().contains("Unknown branch"));
+    }
+
+    @Test
     void forkedBranchesSharePriorCommitHistoryWithoutCreatingNewCommits() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
