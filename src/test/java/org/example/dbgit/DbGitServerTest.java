@@ -1,6 +1,8 @@
 package org.example.dbgit;
 
+import org.example.branch.BranchDatabase;
 import org.example.branch.BranchFork;
+import org.example.branch.BranchMetadataStore;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
 import org.example.branch.PostgresConnectorFactory;
@@ -22,6 +24,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,7 +40,7 @@ class DbGitServerTest {
     @BeforeEach
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService dbGitService = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory()));
+        DbGitService dbGitService = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
         server = new DbGitServer(dbGitService, 0);
         serverThread = new Thread(() -> {
             try {
@@ -67,7 +71,7 @@ class DbGitServerTest {
 
         Response branchResponse = send("dbgit branch");
         assertEquals("OK", branchResponse.status);
-        assertEquals(List.of("* main", "  feature/orders"), branchResponse.body);
+        assertEquals(List.of("  feature/orders", "* main"), branchResponse.body);
     }
 
     @Test
@@ -130,6 +134,30 @@ class DbGitServerTest {
                 public void close() {
                 }
             };
+        }
+    }
+
+    private static final class InMemoryMetadataStore implements BranchMetadataStore {
+        private final Map<String, List<BranchDatabase>> databasesByBranch = new TreeMap<>(Map.of("main", List.of()));
+
+        @Override
+        public List<String> branches() {
+            return List.copyOf(databasesByBranch.keySet());
+        }
+
+        @Override
+        public boolean createBranch(String branchName, String forkedFrom) {
+            return databasesByBranch.putIfAbsent(branchName, List.of()) == null;
+        }
+
+        @Override
+        public List<BranchDatabase> databasesForBranch(String branch) {
+            return databasesByBranch.getOrDefault(branch, List.of());
+        }
+
+        @Override
+        public void recordDatabases(String branch, List<BranchDatabase> databases) {
+            databasesByBranch.put(branch, databases);
         }
     }
 }

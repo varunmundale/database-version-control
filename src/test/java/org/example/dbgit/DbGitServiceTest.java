@@ -1,6 +1,8 @@
 package org.example.dbgit;
 
+import org.example.branch.BranchDatabase;
 import org.example.branch.BranchFork;
+import org.example.branch.BranchMetadataStore;
 import org.example.branch.CommandResult;
 import org.example.branch.CommandRunner;
 import org.example.branch.PostgresConnectorFactory;
@@ -15,6 +17,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -25,27 +29,28 @@ class DbGitServiceTest {
     @Test
     void createsABranchDatabaseAndWritesLocalDbGitState() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory()));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory(), metadataStore));
 
         DbGitCommandResult result = service.execute("dbgit checkout -b feature/orders");
 
         assertEquals(List.of("Switched to a new branch 'feature/orders'."), result.lines());
         assertEquals("feature/orders", Files.readString(workingDirectory.resolve(".dbgit/HEAD")).trim());
-        assertEquals(List.of("main", "feature/orders"), Files.readAllLines(workingDirectory.resolve(".dbgit/branches")));
+        assertEquals(List.of("feature/orders", "main"), metadataStore.branches());
         assertEquals(1, runner.commands.size());
     }
 
     @Test
     void checksOutExistingBranchesAndListsAllBranches() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory()));
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
         service.execute("dbgit checkout -b feature/orders");
 
         DbGitCommandResult checkout = service.execute("dbgit checkout main");
         DbGitCommandResult branchList = service.execute("dbgit branch");
 
         assertEquals(List.of("Switched to branch 'main'."), checkout.lines());
-        assertEquals(List.of("* main", "  feature/orders"), branchList.lines());
+        assertEquals(List.of("  feature/orders", "* main"), branchList.lines());
         assertEquals(1, runner.commands.size());
     }
 
@@ -82,6 +87,30 @@ class DbGitServiceTest {
                 public void close() {
                 }
             };
+        }
+    }
+
+    private static final class InMemoryMetadataStore implements BranchMetadataStore {
+        private final Map<String, List<BranchDatabase>> databasesByBranch = new TreeMap<>(Map.of("main", List.of()));
+
+        @Override
+        public List<String> branches() {
+            return List.copyOf(databasesByBranch.keySet());
+        }
+
+        @Override
+        public boolean createBranch(String branchName, String forkedFrom) {
+            return databasesByBranch.putIfAbsent(branchName, List.of()) == null;
+        }
+
+        @Override
+        public List<BranchDatabase> databasesForBranch(String branch) {
+            return databasesByBranch.getOrDefault(branch, List.of());
+        }
+
+        @Override
+        public void recordDatabases(String branch, List<BranchDatabase> databases) {
+            databasesByBranch.put(branch, databases);
         }
     }
 }

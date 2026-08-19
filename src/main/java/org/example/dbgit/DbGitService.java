@@ -48,15 +48,15 @@ public final class DbGitService {
 
     private DbGitCommandResult createAndCheckout(String branch) throws IOException {
         String fromBranch = repository.currentBranch();
-        if (repository.branchExists(branch)) {
-            throw new IllegalArgumentException("Branch already exists: " + branch);
-        }
         branchFork.fork(fromBranch, branch);
-        repository.createAndCheckout(branch);
+        repository.checkout(branch);
         return print(List.of("Switched to a new branch '" + branch + "'."));
     }
 
     private DbGitCommandResult checkout(String branch) throws IOException {
+        if (!branchFork.metadataStore().branches().contains(branch)) {
+            throw new IllegalArgumentException("Unknown branch: " + branch);
+        }
         repository.checkout(branch);
         return print(List.of("Switched to branch '" + branch + "'."));
     }
@@ -64,7 +64,7 @@ public final class DbGitService {
     private List<String> branchLines() throws IOException {
         String currentBranch = repository.currentBranch();
         List<String> lines = new ArrayList<>();
-        for (String branch : repository.branches()) {
+        for (String branch : branchFork.metadataStore().branches()) {
             lines.add((branch.equals(currentBranch) ? "* " : "  ") + branch);
         }
         return lines;

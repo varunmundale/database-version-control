@@ -2,51 +2,85 @@ package org.example.branch;
 
 import org.example.database.PostgresConnector;
 import org.example.database.SqlConnector;
-import org.example.schema.StableId;
 
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** Creates a branch database in one persistent PostgreSQL Docker container. */
+/** Forks a branch's databases, as copies, into one persistent PostgreSQL Docker container. */
 public final class BranchFork {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
     private static final int CONTAINER_PORT = 5432;
     private static final int READY_ATTEMPTS = 20;
+    private static final String POSTGRES_LOGICAL_NAME = "postgres";
 
     private final CommandRunner commandRunner;
     private final PostgresDockerConfig config;
     private final PostgresConnectorFactory connectorFactory;
+    private final BranchMetadataStore metadataStore;
 
     public BranchFork() {
         this(new ProcessCommandRunner());
     }
 
     public BranchFork(CommandRunner commandRunner) {
-        this(commandRunner, defaultConnectorFactory(PostgresDockerConfig.getInstance()));
+        this(commandRunner, defaultConnectorFactory(PostgresDockerConfig.getInstance()), defaultMetadataStore());
     }
 
     public BranchFork(CommandRunner commandRunner, PostgresConnectorFactory connectorFactory) {
+        this(commandRunner, connectorFactory, defaultMetadataStore());
+    }
+
+    public BranchFork(CommandRunner commandRunner, PostgresConnectorFactory connectorFactory, BranchMetadataStore metadataStore) {
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
         this.config = PostgresDockerConfig.getInstance();
         this.connectorFactory = Objects.requireNonNull(connectorFactory, "connectorFactory must not be null");
+        this.metadataStore = Objects.requireNonNull(metadataStore, "metadataStore must not be null");
+    }
+
+    public BranchMetadataStore metadataStore() {
+        return metadataStore;
     }
 
     public BranchForkResult fork(String fromBranch, String currentBranch) {
         validateBranch(fromBranch, "fromBranch");
         validateBranch(currentBranch, "currentBranch");
-        String databaseName = databaseName(currentBranch);
+
+        if (!metadataStore.createBranch(currentBranch, fromBranch)) {
+            throw fail("Branch already exists: " + currentBranch, null);
+        }
 
         ensureSharedContainer();
         waitUntilReady();
-        out("Creating database '" + databaseName + "' for branch '" + currentBranch + "'.");
-        executeSql("create branch database", config.adminDatabase(), "CREATE DATABASE \"" + databaseName + "\"");
-        executeSql("initialize branch metadata", databaseName, metadataSql(fromBranch, currentBranch));
-        out("Recorded fork from '" + fromBranch + "' to '" + currentBranch + "' in database '" + databaseName + "'.");
+
+        String branchPrefix = sanitizeBranchName(currentBranch);
+        List<BranchDatabase> forkedDatabases = new ArrayList<>();
+        forkedDatabases.add(forkDatabase(branchPrefix, POSTGRES_LOGICAL_NAME, config.adminDatabase(), currentBranch));
+
+        List<BranchDatabase> trackedDatabases = metadataStore.databasesForBranch(fromBranch);
+        List<BranchDatabase> forkedTrackedDatabases = new ArrayList<>();
+        for (BranchDatabase parentDatabase : trackedDatabases) {
+            BranchDatabase forked = forkDatabase(branchPrefix, parentDatabase.logicalName(), parentDatabase.databaseName(), currentBranch);
+            forkedDatabases.add(forked);
+            forkedTrackedDatabases.add(forked);
+        }
+
+        metadataStore.recordDatabases(currentBranch, forkedTrackedDatabases);
+        out("Recorded branch '" + currentBranch + "' forked from '" + fromBranch + "' with " + forkedDatabases.size() + " database(s).");
         out("Branch fork completed for '" + currentBranch + "'.");
-        return new BranchForkResult(fromBranch, currentBranch, config.containerName(), databaseName);
+        return new BranchForkResult(fromBranch, currentBranch, config.containerName(),
+                forkedDatabases.stream().map(BranchDatabase::databaseName).toList());
+    }
+
+    private BranchDatabase forkDatabase(String branchPrefix, String logicalName, String parentDatabaseName, String currentBranch) {
+        String childDatabaseName = branchPrefix + "_" + logicalName;
+        out("Forking database '" + parentDatabaseName + "' into '" + childDatabaseName + "' for branch '" + currentBranch + "'.");
+        executeSql("fork database '" + logicalName + "'", config.adminDatabase(),
+                "CREATE DATABASE \"" + childDatabaseName + "\" WITH TEMPLATE \"" + parentDatabaseName + "\"");
+        return new BranchDatabase(logicalName, childDatabaseName);
     }
 
     private void ensureSharedContainer() {
@@ -107,11 +141,15 @@ public final class BranchFork {
                 + "?user=" + config.user() + "&password=" + config.password();
     }
 
-    private static String metadataSql(String fromBranch, String currentBranch) {
-        return "CREATE TABLE IF NOT EXISTS branch_metadata ("
-                + "branch_name TEXT PRIMARY KEY, forked_from TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
-                + "INSERT INTO branch_metadata (branch_name, forked_from) VALUES ('" + currentBranch + "', '" + fromBranch + "') "
-                + "ON CONFLICT (branch_name) DO UPDATE SET forked_from = EXCLUDED.forked_from;";
+    private static BranchMetadataStore defaultMetadataStore() {
+        MetadataServerConfig metadataConfig = MetadataServerConfig.getInstance();
+        PostgresConnectorFactory factory = database -> new PostgresConnector(metadataJdbcUrl(metadataConfig, database));
+        return new PostgresBranchMetadataStore(factory, metadataConfig.adminDatabase(), metadataConfig.database());
+    }
+
+    private static String metadataJdbcUrl(MetadataServerConfig metadataConfig, String database) {
+        return "jdbc:postgresql://" + metadataConfig.host() + ":" + metadataConfig.port() + "/" + database
+                + "?user=" + metadataConfig.user() + "&password=" + metadataConfig.password();
     }
 
     private void runChecked(String operation, List<String> command) {
@@ -151,11 +189,9 @@ public final class BranchFork {
         }
     }
 
-    private static String databaseName(String currentBranch) {
-        String readableBranch = currentBranch.replaceAll("[^a-zA-Z0-9_.-]", "_").toLowerCase();
-        String readablePrefix = readableBranch.length() > 40 ? readableBranch.substring(0, 40) : readableBranch;
-        String suffix = StableId.of("branch", currentBranch).value().substring("branch_".length(), "branch_".length() + 8);
-        return "branch_" + readablePrefix + "_" + suffix;
+    private static String sanitizeBranchName(String branch) {
+        String readableBranch = branch.replaceAll("[^a-zA-Z0-9_.-]", "_").toLowerCase();
+        return readableBranch.length() > 40 ? readableBranch.substring(0, 40) : readableBranch;
     }
 
     private static BranchForkException fail(String message, Throwable cause) {
