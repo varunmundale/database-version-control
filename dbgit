@@ -2,4 +2,4 @@
 # CLI client for the dbService daemon. Requires ./dbService to already be running.
 set -euo pipefail
 cd "$(dirname "$0")"
-exec mvn -q exec:java -Dexec.mainClass=org.example.Main -Dexec.args="$*"
+exec mvn -q exec:java -Dexec.mainClass=org.example.client.Main -Dexec.args="$*"
