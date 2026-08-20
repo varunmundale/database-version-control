@@ -26,7 +26,15 @@ EOF
 ./dbgit add <<'EOF'
 ALTER TABLE employees ADD COLUMN hire_date DATE;
 EOF
-
+./dbgit add <<'EOF'
+ALTER TABLE employees ALTER COLUMN department TYPE integer USING department::integer
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees DROP COLUMN salary;
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees ADD COLUMN salary DECIMAL(10, 2);
+EOF
 ./dbgit commit
 
 ./dbgit checkout mybranch
@@ -34,7 +42,24 @@ EOF
 ./dbgit add <<'EOF'
 ALTER TABLE employees ADD COLUMN end_date DATE;
 EOF
-
+./dbgit add <<'EOF'
+ALTER TABLE employees DROP COLUMN age;
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees RENAME COLUMN department TO department1;
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees DROP COLUMN salary;
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees ADD COLUMN salary DECIMAL(10, 2);
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees DROP COLUMN salary;
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees ADD COLUMN salary DECIMAL(10, 2);
+EOF
 ./dbgit commit
 
 ./dbgit diff mybranch mybranch2

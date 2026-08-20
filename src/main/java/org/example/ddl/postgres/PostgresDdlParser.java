@@ -67,11 +67,17 @@ public final class PostgresDdlParser implements DdlParser {
         };
     }
 
-    /** Only {@code ALTER COLUMN ... TYPE ...} is understood - {@code SET}/{@code DROP NOT NULL} and similar leave the type token empty or non-empty specs, which this rejects rather than silently misreading. */
+    /**
+     * Only {@code ALTER COLUMN ... TYPE ...} (optionally with a {@code USING <expr>} conversion clause, which is
+     * accepted but discarded - the internal model only needs the resulting type) is understood. {@code SET}/
+     * {@code DROP NOT NULL} and similar leave the type token empty or non-{@code USING} specs, which this rejects
+     * rather than silently misreading.
+     */
     private SchemaOperation toAlterColumnType(String tableName, net.sf.jsqlparser.statement.create.table.ColumnDefinition column, String ddl) {
         List<String> specs = column.getColumnSpecs();
         String newType = column.getColDataType() == null ? null : column.getColDataType().getDataType();
-        if ((specs != null && !specs.isEmpty()) || newType == null || newType.equalsIgnoreCase("SET")) {
+        boolean hasUnsupportedSpecs = specs != null && !specs.isEmpty() && !specs.getFirst().equalsIgnoreCase("USING");
+        if (hasUnsupportedSpecs || newType == null || newType.equalsIgnoreCase("SET")) {
             throw unsupported(ddl);
         }
         return new SchemaOperation.AlterColumnType(tableName, normalize(column.getColumnName()), normalizeType(newType));

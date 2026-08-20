@@ -108,6 +108,16 @@ class PostgresDdlParserTest {
     }
 
     @Test
+    void parsesAlterColumnTypeWithAUsingConversionClause() {
+        SchemaOperation.AlterColumnType operation = (SchemaOperation.AlterColumnType) parser.parse(
+                "ALTER TABLE employees ALTER COLUMN department TYPE integer USING department::integer");
+
+        assertEquals("employees", operation.tableName());
+        assertEquals("department", operation.columnName());
+        assertEquals("integer", operation.newType());
+    }
+
+    @Test
     void rejectsAlterColumnVariantsThatAreNotATypeChange() {
         assertThrows(IllegalArgumentException.class, () -> parser.parse("ALTER TABLE orders ALTER COLUMN col1 SET NOT NULL"));
         assertThrows(IllegalArgumentException.class, () -> parser.parse("ALTER TABLE orders ALTER COLUMN col1 DROP NOT NULL"));

@@ -95,6 +95,32 @@ class SchemaDiffTest {
         assertTrue(entries.getFirst().description().contains("col1"));
     }
 
+    @Test
+    void columnEntriesWithinATableAreOrderedByColumnName() {
+        TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, zeta TEXT, alpha TEXT, mid TEXT);");
+        TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);");
+        // zeta, alpha and mid are each LEFT-only entries; output should read alpha, mid, zeta - not creation order.
+
+        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(left), List.of(right));
+
+        assertEquals(List.of("column orders.alpha", "column orders.mid", "column orders.zeta"),
+                entries.stream().map(SchemaDiff.Entry::description).toList());
+    }
+
+    @Test
+    void eachTableIsDiffedIndependentlyAndResultsAreOrderedByTableNameThenColumnName() {
+        TableModel zebras = table("CREATE TABLE zebras (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        TableModel accounts = table("CREATE TABLE accounts (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        TableModel zebrasChanged = table("CREATE TABLE zebras (id INT PRIMARY KEY);", "ALTER TABLE zebras ADD COLUMN total INT NOT NULL;");
+        TableModel accountsChanged = table("CREATE TABLE accounts (id INT PRIMARY KEY);", "ALTER TABLE accounts ADD COLUMN total INT NOT NULL;");
+
+        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(zebras, accounts), List.of(zebrasChanged, accountsChanged));
+
+        // "accounts" sorts before "zebras" even though "zebras" was added to the input lists first.
+        assertEquals(List.of("column accounts.total", "column zebras.total"),
+                entries.stream().map(SchemaDiff.Entry::description).map(d -> d.split(" \\(")[0]).toList());
+    }
+
     private ChangeSet changeset(String ddl) {
         return new ChangeSet(idSequence++, "test", ddl, ChangesetStatus.COMMIT, Instant.now());
     }

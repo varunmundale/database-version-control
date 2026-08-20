@@ -8,10 +8,19 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
-/** Compares two branches' internal schema representations, matching tables and columns by stable id. */
+/**
+ * Compares two branches' internal schema representations. Each table is its own independent schema object, so the
+ * diff is computed one table at a time: tables are matched by name (a table rename is not tracked - it shows up
+ * as one table disappearing and a different one appearing, not as a rename), and within a table, columns are
+ * matched by stable id, which - thanks to {@link org.example.replay.SchemaReplayer}'s rename-aware replay -
+ * survives a {@code RENAME COLUMN} on either side. Output is ordered by table name, then by column name within
+ * each table.
+ */
 public final class SchemaDiff {
     public enum Side { LEFT, RIGHT, CONFLICT }
 
@@ -20,72 +29,84 @@ public final class SchemaDiff {
     }
 
     public static List<Entry> diff(Collection<TableModel> left, Collection<TableModel> right) {
+        Map<String, TableModel> leftByName = byName(left);
+        Map<String, TableModel> rightByName = byName(right);
+        Set<String> tableNames = new TreeSet<>();
+        tableNames.addAll(leftByName.keySet());
+        tableNames.addAll(rightByName.keySet());
+
         List<Entry> entries = new ArrayList<>();
-        diffTables(left, right, entries);
-        diffColumns(left, right, entries);
-        entries.sort(Comparator.comparing(entry -> entry.id().value()));
+        for (String tableName : tableNames) {
+            entries.addAll(diffTable(tableName, leftByName.get(tableName), rightByName.get(tableName)));
+        }
         return entries;
     }
 
-    /** Tables are diffed by presence only - membership changes are already fully captured by their columns. */
-    private static void diffTables(Collection<TableModel> left, Collection<TableModel> right, List<Entry> entries) {
-        Map<StableId, String> leftTables = tableNamesById(left);
-        Map<StableId, String> rightTables = tableNamesById(right);
-        for (Map.Entry<StableId, String> entry : leftTables.entrySet()) {
-            if (!rightTables.containsKey(entry.getKey())) {
-                entries.add(new Entry(entry.getKey(), "table " + entry.getValue(), Side.LEFT));
-            }
+    /** Diffs one table, present on one or both sides, in isolation from every other table. */
+    private static List<Entry> diffTable(String tableName, TableModel left, TableModel right) {
+        List<Entry> entries = new ArrayList<>();
+        if (left != null && right == null) {
+            entries.add(new Entry(left.id(), "table " + tableName, Side.LEFT));
+        } else if (left == null && right != null) {
+            entries.add(new Entry(right.id(), "table " + tableName, Side.RIGHT));
         }
-        for (Map.Entry<StableId, String> entry : rightTables.entrySet()) {
-            if (!leftTables.containsKey(entry.getKey())) {
-                entries.add(new Entry(entry.getKey(), "table " + entry.getValue(), Side.RIGHT));
-            }
-        }
+        entries.addAll(diffColumns(left, right));
+        return entries;
     }
 
     /**
-     * Columns are matched by stable id, which - thanks to {@link org.example.replay.SchemaReplayer}'s rename
-     * tracking - survives a {@code RENAME COLUMN} on either side. So the same id can legitimately carry a
-     * different name on each side (one branch renamed it, the other didn't, or renamed it differently); that
-     * mismatch is itself a conflict, distinct from - but reported alongside - a plain signature difference.
+     * Columns are matched by stable id, which can legitimately carry a different name on each side (one branch
+     * renamed it, the other didn't, or renamed it differently); that mismatch is itself a conflict, distinct from
+     * - but reported alongside - a plain signature difference. Results come back ordered by column name.
      */
-    private static void diffColumns(Collection<TableModel> left, Collection<TableModel> right, List<Entry> entries) {
+    private static List<Entry> diffColumns(TableModel left, TableModel right) {
         Map<StableId, ColumnRef> leftColumns = columnsById(left);
         Map<StableId, ColumnRef> rightColumns = columnsById(right);
+        List<NamedEntry> drafts = new ArrayList<>();
+
         for (Map.Entry<StableId, ColumnRef> entry : leftColumns.entrySet()) {
             ColumnRef leftColumn = entry.getValue();
             ColumnRef rightColumn = rightColumns.get(entry.getKey());
             if (rightColumn == null) {
-                entries.add(new Entry(entry.getKey(), "column " + leftColumn.label(), Side.LEFT));
+                drafts.add(named(leftColumn.columnName(), entry.getKey(), "column " + leftColumn.label(), Side.LEFT));
             } else if (!leftColumn.columnName().equals(rightColumn.columnName())) {
-                entries.add(new Entry(entry.getKey(), "column " + leftColumn.label() + " renamed to '" + rightColumn.columnName()
-                        + "' on the other side (left: " + leftColumn.signature() + ", right: " + rightColumn.signature() + ")", Side.CONFLICT));
+                drafts.add(named(leftColumn.columnName(), entry.getKey(), "column " + leftColumn.label() + " renamed to '"
+                        + rightColumn.columnName() + "' on the other side (left: " + leftColumn.signature()
+                        + ", right: " + rightColumn.signature() + ")", Side.CONFLICT));
             } else if (!leftColumn.signature().equals(rightColumn.signature())) {
-                entries.add(new Entry(entry.getKey(), "column " + leftColumn.label()
+                drafts.add(named(leftColumn.columnName(), entry.getKey(), "column " + leftColumn.label()
                         + " (left: " + leftColumn.signature() + ", right: " + rightColumn.signature() + ")", Side.CONFLICT));
             }
         }
         for (Map.Entry<StableId, ColumnRef> entry : rightColumns.entrySet()) {
             if (!leftColumns.containsKey(entry.getKey())) {
-                entries.add(new Entry(entry.getKey(), "column " + entry.getValue().label(), Side.RIGHT));
+                drafts.add(named(entry.getValue().columnName(), entry.getKey(), "column " + entry.getValue().label(), Side.RIGHT));
             }
         }
+
+        return drafts.stream().sorted(Comparator.comparing(NamedEntry::columnName)).map(NamedEntry::entry).toList();
     }
 
-    private static Map<StableId, String> tableNamesById(Collection<TableModel> tables) {
-        Map<StableId, String> names = new LinkedHashMap<>();
+    private static NamedEntry named(String columnName, StableId id, String description, Side side) {
+        return new NamedEntry(columnName, new Entry(id, description, side));
+    }
+
+    private static Map<String, TableModel> byName(Collection<TableModel> tables) {
+        Map<String, TableModel> byName = new LinkedHashMap<>();
         for (TableModel table : tables) {
-            names.put(table.id(), table.name());
+            byName.put(table.name(), table);
         }
-        return names;
+        return byName;
     }
 
-    private static Map<StableId, ColumnRef> columnsById(Collection<TableModel> tables) {
+    /** @param table {@code null} if the table does not exist on this side */
+    private static Map<StableId, ColumnRef> columnsById(TableModel table) {
         Map<StableId, ColumnRef> columns = new LinkedHashMap<>();
-        for (TableModel table : tables) {
-            for (ColumnModel column : table.columns()) {
-                columns.put(column.id(), new ColumnRef(table.name(), column.name(), signature(column)));
-            }
+        if (table == null) {
+            return columns;
+        }
+        for (ColumnModel column : table.columns()) {
+            columns.put(column.id(), new ColumnRef(table.name(), column.name(), signature(column)));
         }
         return columns;
     }
@@ -99,6 +120,9 @@ public final class SchemaDiff {
         String label() {
             return tableName + "." + columnName;
         }
+    }
+
+    private record NamedEntry(String columnName, Entry entry) {
     }
 
     private SchemaDiff() {
