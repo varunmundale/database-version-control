@@ -1,5 +1,7 @@
 package org.example.server;
 
+import org.example.config.ServiceEndpointConfig;
+
 import java.io.IOException;
 import java.nio.file.Path;
 
@@ -7,7 +9,7 @@ import java.nio.file.Path;
 public final class DbServiceMain {
     public static void main(String[] args) throws IOException {
         Path workingDirectory = Path.of(".").toAbsolutePath().normalize();
-        int port = ServiceConfig.getInstance().port();
+        int port = ServiceEndpointConfig.getInstance().port();
         try (DbGitServer server = new DbGitServer(workingDirectory, port)) {
             System.out.println("dbService listening on port " + server.port() + " (workspace: " + workingDirectory + ")");
             server.serve();

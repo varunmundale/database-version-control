@@ -1,7 +1,7 @@
 package org.example.server;
 
-import org.example.commands.DbGitCommandResult;
-import org.example.commands.DbGitService;
+import org.example.service.DbGitCommandResult;
+import org.example.service.DbGitService;
 
 import java.io.BufferedReader;
 import java.io.Closeable;

@@ -1,6 +1,6 @@
 package org.example.client;
 
-import org.example.server.ServiceConfig;
+import org.example.config.ServiceEndpointConfig;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,7 +17,7 @@ public final class DbGitClient {
     private final int port;
 
     public DbGitClient() {
-        this(ServiceConfig.getInstance().port());
+        this(ServiceEndpointConfig.getInstance().port());
     }
 
     public DbGitClient(int port) {

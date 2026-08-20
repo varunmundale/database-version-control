@@ -1,17 +1,19 @@
 package org.example.client;
 
-import org.example.adapters.DatabaseSchema;
-import org.example.commands.BranchFork;
-import org.example.commands.BranchMetadataStore;
-import org.example.commands.ChangeSet;
-import org.example.commands.ChangesetStatus;
-import org.example.commands.CommandResult;
-import org.example.commands.CommandRunner;
-import org.example.commands.DbGitService;
-import org.example.connectors.PostgresConnectorFactory;
-import org.example.connectors.SqlConnector;
-import org.example.connectors.SqlExecutionResult;
+import org.example.branch.BranchFork;
+import org.example.branch.CommandResult;
+import org.example.branch.CommandRunner;
+import org.example.config.ConnectionSettings;
+import org.example.connector.ConnectorFactory;
+import org.example.connector.SqlConnector;
+import org.example.connector.SqlExecutionResult;
+import org.example.connector.SqlTransaction;
+import org.example.model.schema.DatabaseSchema;
+import org.example.model.versioning.ChangeSet;
+import org.example.model.versioning.ChangesetStatus;
 import org.example.server.DbGitServer;
+import org.example.service.DbGitService;
+import org.example.versioning.BranchMetadataStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -138,9 +140,9 @@ class DbGitClientTest {
         }
     }
 
-    private static final class NoOpConnectorFactory implements PostgresConnectorFactory {
+    private static final class NoOpConnectorFactory implements ConnectorFactory {
         @Override
-        public SqlConnector connect(String database) {
+        public SqlConnector connect(ConnectionSettings settings) {
             return new SqlConnector() {
                 @Override
                 public SqlExecutionResult execute(String sql) {
@@ -150,6 +152,11 @@ class DbGitClientTest {
                 @Override
                 public DatabaseSchema inspectSchema() {
                     return new DatabaseSchema("postgresql", "public", List.of());
+                }
+
+                @Override
+                public <T> T transaction(SqlTransaction<T> work) throws java.sql.SQLException {
+                    return work.execute(this);
                 }
 
                 @Override
