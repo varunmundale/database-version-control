@@ -1,7 +1,5 @@
 package org.example.connector;
 
-import org.example.model.schema.DatabaseSchema;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -17,11 +15,9 @@ import java.util.Objects;
 /** Shared JDBC implementation for the dialect-specific connectors. */
 public abstract class JdbcConnector implements SqlConnector {
     private final Connection connection;
-    private final SchemaParser schemaParser;
 
-    protected JdbcConnector(String jdbcUrl, SchemaParser schemaParser) throws SQLException {
+    protected JdbcConnector(String jdbcUrl) throws SQLException {
         connection = DriverManager.getConnection(Objects.requireNonNull(jdbcUrl, "jdbcUrl must not be null"));
-        this.schemaParser = Objects.requireNonNull(schemaParser, "schemaParser must not be null");
     }
 
     @Override
@@ -35,11 +31,6 @@ public abstract class JdbcConnector implements SqlConnector {
                 return SqlExecutionResult.query(readRows(resultSet));
             }
         }
-    }
-
-    @Override
-    public DatabaseSchema inspectSchema() throws SQLException {
-        return schemaParser.parse(connection);
     }
 
     @Override

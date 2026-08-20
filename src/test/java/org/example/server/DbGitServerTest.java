@@ -8,7 +8,6 @@ import org.example.connector.ConnectorFactory;
 import org.example.connector.SqlConnector;
 import org.example.connector.SqlExecutionResult;
 import org.example.connector.SqlTransaction;
-import org.example.model.schema.DatabaseSchema;
 import org.example.model.versioning.ChangeSet;
 import org.example.model.versioning.ChangesetStatus;
 import org.example.service.DbGitService;
@@ -158,11 +157,6 @@ class DbGitServerTest {
                 @Override
                 public SqlExecutionResult execute(String sql) {
                     return new SqlExecutionResult(false, 0, List.of());
-                }
-
-                @Override
-                public DatabaseSchema inspectSchema() {
-                    return new DatabaseSchema("postgresql", "public", List.of());
                 }
 
                 @Override

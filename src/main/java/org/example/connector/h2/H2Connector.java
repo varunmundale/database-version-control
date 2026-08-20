@@ -8,7 +8,7 @@ import java.sql.SQLException;
 public final class H2Connector extends JdbcConnector {
 
     public H2Connector(String jdbcUrl) throws SQLException {
-        super(jdbcUrl, new H2SchemaParser());
+        super(jdbcUrl);
     }
 
     public static H2Connector inMemory(String databaseName) throws SQLException {

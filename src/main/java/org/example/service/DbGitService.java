@@ -75,7 +75,9 @@ public final class DbGitService {
             String branch = repository.currentBranch();
             BranchMetadataStore metadataStore = branchFork.metadataStore();
 
-            TableModel updated = schemaReplayer.preview(branchHistory(branch, metadataStore), statement);
+            String tableName = schemaReplayer.tableName(statement);
+            Map<String, TableModel> currentSchema = schemaReplayer.replay(branchHistory(branch, metadataStore));
+            TableModel updated = schemaReplayer.apply("public", statement, currentSchema.get(tableName));
 
             long changesetId = metadataStore.stageChangeset(branch, statement);
 

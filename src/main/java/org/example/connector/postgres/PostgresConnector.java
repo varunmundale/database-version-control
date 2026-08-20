@@ -4,9 +4,9 @@ import org.example.connector.JdbcConnector;
 
 import java.sql.SQLException;
 
-/** PostgreSQL JDBC connector using the shared SQL and schema-inspection abstraction. */
+/** PostgreSQL JDBC connector using the shared SQL execution abstraction. */
 public final class PostgresConnector extends JdbcConnector {
     public PostgresConnector(String jdbcUrl) throws SQLException {
-        super(jdbcUrl, new PostgresSchemaParser());
+        super(jdbcUrl);
     }
 }

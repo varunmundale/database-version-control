@@ -43,6 +43,12 @@ public final class SchemaDiff {
         }
     }
 
+    /**
+     * Columns are matched by stable id, which - thanks to {@link org.example.replay.SchemaReplayer}'s rename
+     * tracking - survives a {@code RENAME COLUMN} on either side. So the same id can legitimately carry a
+     * different name on each side (one branch renamed it, the other didn't, or renamed it differently); that
+     * mismatch is itself a conflict, distinct from - but reported alongside - a plain signature difference.
+     */
     private static void diffColumns(Collection<TableModel> left, Collection<TableModel> right, List<Entry> entries) {
         Map<StableId, ColumnRef> leftColumns = columnsById(left);
         Map<StableId, ColumnRef> rightColumns = columnsById(right);
@@ -51,6 +57,9 @@ public final class SchemaDiff {
             ColumnRef rightColumn = rightColumns.get(entry.getKey());
             if (rightColumn == null) {
                 entries.add(new Entry(entry.getKey(), "column " + leftColumn.label(), Side.LEFT));
+            } else if (!leftColumn.columnName().equals(rightColumn.columnName())) {
+                entries.add(new Entry(entry.getKey(), "column " + leftColumn.label() + " renamed to '" + rightColumn.columnName()
+                        + "' on the other side (left: " + leftColumn.signature() + ", right: " + rightColumn.signature() + ")", Side.CONFLICT));
             } else if (!leftColumn.signature().equals(rightColumn.signature())) {
                 entries.add(new Entry(entry.getKey(), "column " + leftColumn.label()
                         + " (left: " + leftColumn.signature() + ", right: " + rightColumn.signature() + ")", Side.CONFLICT));
@@ -75,7 +84,7 @@ public final class SchemaDiff {
         Map<StableId, ColumnRef> columns = new LinkedHashMap<>();
         for (TableModel table : tables) {
             for (ColumnModel column : table.columns()) {
-                columns.put(column.id(), new ColumnRef(table.name() + "." + column.name(), signature(column)));
+                columns.put(column.id(), new ColumnRef(table.name(), column.name(), signature(column)));
             }
         }
         return columns;
@@ -86,7 +95,10 @@ public final class SchemaDiff {
                 + (column.defaultValue() == null ? "" : " DEFAULT " + column.defaultValue());
     }
 
-    private record ColumnRef(String label, String signature) {
+    private record ColumnRef(String tableName, String columnName, String signature) {
+        String label() {
+            return tableName + "." + columnName;
+        }
     }
 
     private SchemaDiff() {

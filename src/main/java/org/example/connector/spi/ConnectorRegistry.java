@@ -12,9 +12,8 @@ import java.util.Objects;
 /**
  * Maps a dialect name (e.g. {@code "postgresql"}) to the {@link ConnectorFactory} that knows how to open
  * connections for it. Onboarding a new vendor means implementing a {@link org.example.connector.SqlConnector}
- * (typically by extending {@link org.example.connector.JdbcConnector}) and a matching
- * {@link org.example.connector.SchemaParser}, then registering a factory for it here - no other code needs to
- * change.
+ * (typically by extending {@link org.example.connector.JdbcConnector}), then registering a factory for it here -
+ * no other code needs to change.
  */
 public final class ConnectorRegistry {
     private final Map<String, ConnectorFactory> factories = new HashMap<>();

@@ -1,96 +1,67 @@
 package org.example.replay;
 
-import org.example.connector.SqlConnector;
-import org.example.connector.h2.H2Connector;
-import org.example.model.schema.DatabaseSchema;
+import org.example.ddl.DdlParser;
+import org.example.ddl.SchemaOperation;
+import org.example.ddl.SchemaOperationApplier;
+import org.example.ddl.postgres.PostgresDdlParser;
 import org.example.model.schema.TableModel;
 import org.example.model.versioning.ChangeSet;
 import org.example.model.versioning.ChangesetStatus;
 
-import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Objects;
 
 /**
- * Rebuilds a schema from scratch by replaying DDL changesets, in order, through a disposable in-memory database -
- * reusing the same JDBC-based {@link org.example.connector.SchemaParser} used for real databases instead of a
- * separate hand-written DDL parser. {@code DATABASE_TO_LOWER=TRUE} keeps identifier casing aligned with
- * PostgreSQL's (H2 upper-cases unquoted identifiers by default).
+ * Rebuilds a schema entirely in memory - no database, no scratch connection - by reading each changeset's raw
+ * {@code ddl}, extracting its {@link SchemaOperation} via a {@link DdlParser} (PostgreSQL by default), and folding
+ * it into a {@link TableModel} via {@link SchemaOperationApplier}. This class owns neither concern itself: parsing
+ * is per-vendor and injected, applying is shared and stateless, so this class stays the same regardless of which
+ * dialect's DDL grammar is actually being replayed.
+ *
+ * <p>{@code dbgit add}'s own preview goes through the same {@link DdlParser} and {@link SchemaOperationApplier}
+ * (via {@link #tableName} and {@link #apply}), so there is exactly one parser and one applier in play anywhere in
+ * the tool.
  */
 public final class SchemaReplayer {
+    private static final String SCHEMA = "public";
 
-    /** Replays committed history into a schema snapshot, e.g. for {@code dbgit diff}. */
+    private final DdlParser ddlParser;
+    private final SchemaOperationApplier operationApplier = new SchemaOperationApplier();
+
+    public SchemaReplayer() {
+        this(new PostgresDdlParser());
+    }
+
+    public SchemaReplayer(DdlParser ddlParser) {
+        this.ddlParser = Objects.requireNonNull(ddlParser, "ddlParser must not be null");
+    }
+
+    /** Rebuilds a schema by reading {@code changesets} and applying each one's ddl, in order. Pure in-memory. */
     public Map<String, TableModel> replay(List<ChangeSet> changesets) {
-        try (SqlConnector connector = openScratchDatabase()) {
-            applyHistory(connector, changesets);
-            return tablesByName(inspect(connector));
-        } catch (SQLException exception) {
-            throw new ReplayException("Could not open scratch replay database: " + exception.getMessage(), exception);
-        }
-    }
-
-    /**
-     * Replays {@code history}, then validates and applies {@code statement} on top of it, returning the single
-     * table the statement created or modified. Used to preview {@code dbgit add} before it ever touches the
-     * branch's real database.
-     */
-    public TableModel preview(List<ChangeSet> history, String statement) {
-        try (SqlConnector connector = openScratchDatabase()) {
-            applyHistory(connector, history);
-            DatabaseSchema before = inspect(connector);
-            try {
-                connector.execute(statement);
-            } catch (SQLException exception) {
-                throw new IllegalArgumentException("Could not apply DDL statement: " + exception.getMessage(), exception);
-            }
-            return changedTable(before, inspect(connector), statement);
-        } catch (SQLException exception) {
-            throw new ReplayException("Could not open scratch replay database: " + exception.getMessage(), exception);
-        }
-    }
-
-    private void applyHistory(SqlConnector connector, List<ChangeSet> changesets) {
+        Map<String, TableModel> schema = new LinkedHashMap<>();
         for (ChangeSet changeset : changesets) {
             if (changeset.status() != ChangesetStatus.APPLIED && changeset.status() != ChangesetStatus.COMMIT) {
                 continue;
             }
-            try {
-                connector.execute(changeset.ddl());
-            } catch (SQLException exception) {
-                throw new ReplayException("Could not replay changeset #" + changeset.id() + ": " + exception.getMessage(), exception);
-            }
+            SchemaOperation operation = ddlParser.parse(changeset.ddl());
+            schema.put(operation.tableName(), operationApplier.apply(SCHEMA, operation, schema.get(operation.tableName())));
         }
+        return schema;
     }
 
-    private static DatabaseSchema inspect(SqlConnector connector) {
-        try {
-            return connector.inspectSchema();
-        } catch (SQLException exception) {
-            throw new ReplayException("Could not inspect replayed schema: " + exception.getMessage(), exception);
-        }
+    /** The table a CREATE or ALTER statement targets. */
+    public String tableName(String ddl) {
+        return ddlParser.parse(ddl).tableName();
     }
 
-    private static SqlConnector openScratchDatabase() throws SQLException {
-        String name = "replay_" + UUID.randomUUID().toString().replace("-", "");
-        return new H2Connector("jdbc:h2:mem:" + name + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE");
-    }
-
-    private static Map<String, TableModel> tablesByName(DatabaseSchema schema) {
-        Map<String, TableModel> tables = new LinkedHashMap<>();
-        schema.tables().forEach(table -> tables.put(table.name(), table));
-        return tables;
-    }
-
-    private static TableModel changedTable(DatabaseSchema before, DatabaseSchema after, String statement) {
-        Map<String, TableModel> beforeByName = tablesByName(before);
-        for (TableModel table : after.tables()) {
-            TableModel previous = beforeByName.get(table.name());
-            if (previous == null || !previous.columns().equals(table.columns())) {
-                return table;
-            }
-        }
-        throw new IllegalArgumentException("DDL statement did not add or modify any table's columns: " + statement);
+    /**
+     * Builds or mutates the internal representation of one table from a DDL statement.
+     *
+     * @param existing the table's current state, or {@code null} if it does not exist yet
+     */
+    public TableModel apply(String schema, String ddl, TableModel existing) {
+        return operationApplier.apply(schema, ddlParser.parse(ddl), existing);
     }
 }

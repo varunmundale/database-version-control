@@ -8,7 +8,6 @@ import org.example.connector.ConnectorFactory;
 import org.example.connector.SqlConnector;
 import org.example.connector.SqlExecutionResult;
 import org.example.connector.SqlTransaction;
-import org.example.model.schema.DatabaseSchema;
 import org.example.model.versioning.ChangeSet;
 import org.example.model.versioning.ChangesetStatus;
 import org.example.versioning.BranchMetadataStore;
@@ -184,6 +183,30 @@ class DbGitServiceTest {
     }
 
     @Test
+    void renamingAColumnOnOneBranchWhileTheOtherModifiesItIsFlaggedAsAConflict() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+        service.add("ALTER TABLE orders RENAME COLUMN col1 TO col2;");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout main");
+        service.add("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;");
+        service.execute("dbgit commit");
+
+        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+
+        // Same underlying column: renamed on feature/orders, modified under its old name on main - one conflict,
+        // not an unrelated "col1 disappeared" / "col2 appeared" pair.
+        assertEquals(1, result.lines().size());
+        assertTrue(result.lines().getFirst().startsWith("! column"));
+        assertTrue(result.lines().getFirst().contains("col1"));
+        assertTrue(result.lines().getFirst().contains("col2"));
+    }
+
+    @Test
     void refusesToDiffAnUnknownBranch() {
         DbGitService service = new DbGitService(workingDirectory,
                 new BranchFork(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
@@ -235,11 +258,6 @@ class DbGitServiceTest {
                 }
 
                 @Override
-                public DatabaseSchema inspectSchema() {
-                    throw new UnsupportedOperationException();
-                }
-
-                @Override
                 public <T> T transaction(SqlTransaction<T> work) throws java.sql.SQLException {
                     return work.execute(this);
                 }
@@ -263,11 +281,6 @@ class DbGitServiceTest {
                 public SqlExecutionResult execute(String sql) {
                     executedSql = sql;
                     return new SqlExecutionResult(false, 0, List.of());
-                }
-
-                @Override
-                public DatabaseSchema inspectSchema() {
-                    return new DatabaseSchema("postgresql", "public", List.of());
                 }
 
                 @Override
