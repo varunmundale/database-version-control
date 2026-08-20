@@ -163,7 +163,7 @@ class DbGitServiceTest {
     }
 
     @Test
-    void diffsTwoBranchesReportingAConflictWhenBothSidesChangeTheSameColumnDifferently() {
+    void diffPrintsATreeBringingBothSidesConflictingStatementsTogetherUnderTheConflictingColumn() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
@@ -178,8 +178,16 @@ class DbGitServiceTest {
 
         DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
 
-        assertEquals(1, result.lines().size());
-        assertTrue(result.lines().getFirst().startsWith("! column orders.total"));
+        // Both branches added a 'total' column - the same object by stable id - with different types, so
+        // DatabaseDiff flags it as a real conflict and both branches' statements against it are grouped together
+        // under their own labeled node in the tree.
+        assertEquals(List.of(
+                "main vs feature/orders",
+                "- orders",
+                "  |- total (conflicting)",
+                "    |- > ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;",
+                "    |- < ALTER TABLE orders ADD COLUMN total INT NOT NULL;"
+        ), result.lines());
     }
 
     @Test
@@ -199,11 +207,10 @@ class DbGitServiceTest {
         DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
 
         // Same underlying column: renamed on feature/orders, modified under its old name on main - one conflict,
-        // not an unrelated "col1 disappeared" / "col2 appeared" pair.
-        assertEquals(1, result.lines().size());
-        assertTrue(result.lines().getFirst().startsWith("! column"));
-        assertTrue(result.lines().getFirst().contains("col1"));
-        assertTrue(result.lines().getFirst().contains("col2"));
+        // not an unrelated "col1 disappeared" / "col2 appeared" pair, so both statements land under one node.
+        assertTrue(result.lines().contains("  |- col1 (conflicting)"));
+        assertTrue(result.lines().contains("    |- > ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;"));
+        assertTrue(result.lines().contains("    |- < ALTER TABLE orders RENAME COLUMN col1 TO col2;"));
     }
 
     @Test
