@@ -1,9 +1,13 @@
 package org.example.diff;
 
-import org.example.ddl.DdlStatementParser;
 import org.example.model.schema.TableModel;
+import org.example.model.versioning.ChangeSet;
+import org.example.model.versioning.ChangesetStatus;
+import org.example.replay.SchemaReplayer;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.example.diff.SchemaDiff.Side.CONFLICT;
@@ -13,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SchemaDiffTest {
-    private final DdlStatementParser parser = new DdlStatementParser();
+    private final SchemaReplayer replayer = new SchemaReplayer();
 
     @Test
     void identicalSchemasHaveNoDifferences() {
@@ -50,8 +54,8 @@ class SchemaDiffTest {
     @Test
     void aColumnChangedOnBothSidesIsAConflictButTheUnchangedTableIsNot() {
         TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        TableModel right = parser.apply("public", "ALTER TABLE orders ADD COLUMN total INT NOT NULL;",
-                table("CREATE TABLE orders (id INT PRIMARY KEY);"));
+        TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);",
+                "ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
         // right's 'total' has a different type than left's - same stable id, different definition.
 
         List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(left), List.of(right));
@@ -73,7 +77,13 @@ class SchemaDiffTest {
         assertEquals("column orders.total", entries.getFirst().description());
     }
 
-    private TableModel table(String ddl) {
-        return parser.apply("public", ddl, null);
+    /** Builds a fixture TableModel by replaying one or more DDL statements, in order, through the same replay engine DbGitService uses. */
+    private TableModel table(String... ddls) {
+        List<ChangeSet> changesets = new ArrayList<>();
+        long id = 1;
+        for (String ddl : ddls) {
+            changesets.add(new ChangeSet(id++, "test", ddl, ChangesetStatus.COMMIT, Instant.now()));
+        }
+        return replayer.replay(changesets).values().iterator().next();
     }
 }

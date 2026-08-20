@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Reset local repo state so the branches this script creates start fresh.
+rm -f .dbgit/HEAD .dbgit/branches
+
 ./dbgit checkout -b mybranch
 
 ./dbgit add <<'EOF'

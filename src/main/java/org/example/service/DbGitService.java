@@ -3,7 +3,6 @@ package org.example.service;
 import org.example.branch.BranchFork;
 import org.example.branch.DbGitRepository;
 import org.example.connector.SqlConnector;
-import org.example.ddl.DdlStatementParser;
 import org.example.diff.SchemaDiff;
 import org.example.model.schema.TableModel;
 import org.example.model.versioning.ChangeSet;
@@ -16,19 +15,15 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /** Command service supporting {@code dbgit checkout}, {@code dbgit branch}, {@code dbgit add} and {@code dbgit commit}. */
 public final class DbGitService {
-    private static final String SCHEMA = "public";
-
     private final DbGitRepository repository;
     private final BranchFork branchFork;
-    private final DdlStatementParser ddlParser = new DdlStatementParser();
-    private final SchemaReplayer schemaReplayer = new SchemaReplayer(SCHEMA);
+    private final SchemaReplayer schemaReplayer = new SchemaReplayer();
 
     public DbGitService(Path workingDirectory) {
         this(workingDirectory, new BranchFork());
@@ -80,9 +75,7 @@ public final class DbGitService {
             String branch = repository.currentBranch();
             BranchMetadataStore metadataStore = branchFork.metadataStore();
 
-            String tableName = ddlParser.tableName(statement);
-            Map<String, TableModel> internalSchema = currentSchema(branch, metadataStore);
-            TableModel updated = ddlParser.apply(SCHEMA, statement, internalSchema.get(tableName));
+            TableModel updated = schemaReplayer.preview(branchHistory(branch, metadataStore), statement);
 
             long changesetId = metadataStore.stageChangeset(branch, statement);
 
@@ -125,8 +118,8 @@ public final class DbGitService {
             throw new IllegalArgumentException("Unknown branch: " + right);
         }
 
-        Map<String, TableModel> leftSchema = schemaReplayer.replay(metadataStore.commitHistory(left), new LinkedHashMap<>());
-        Map<String, TableModel> rightSchema = schemaReplayer.replay(metadataStore.commitHistory(right), new LinkedHashMap<>());
+        Map<String, TableModel> leftSchema = schemaReplayer.replay(metadataStore.commitHistory(left));
+        Map<String, TableModel> rightSchema = schemaReplayer.replay(metadataStore.commitHistory(right));
         List<SchemaDiff.Entry> diffEntries = SchemaDiff.diff(leftSchema.values(), rightSchema.values());
 
         if (diffEntries.isEmpty()) {
@@ -148,15 +141,16 @@ public final class DbGitService {
     }
 
     /**
-     * The branch's current internal schema: its inherited/committed history (reached via the shared commit chain,
-     * regardless of which branch originally created each commit) plus its own not-yet-committed applied changesets.
+     * The changesets that make up a branch's current schema, in order: its inherited/committed history (reached
+     * via the shared commit chain, regardless of which branch originally created each commit) followed by its own
+     * not-yet-committed applied changesets.
      */
-    private Map<String, TableModel> currentSchema(String branch, BranchMetadataStore metadataStore) {
-        Map<String, TableModel> schema = schemaReplayer.replay(metadataStore.commitHistory(branch), new LinkedHashMap<>());
-        List<ChangeSet> ownApplied = metadataStore.changesetsForBranch(branch).stream()
+    private List<ChangeSet> branchHistory(String branch, BranchMetadataStore metadataStore) {
+        List<ChangeSet> history = new ArrayList<>(metadataStore.commitHistory(branch));
+        history.addAll(metadataStore.changesetsForBranch(branch).stream()
                 .filter(changeset -> changeset.status() == ChangesetStatus.APPLIED)
-                .toList();
-        return schemaReplayer.replay(ownApplied, schema);
+                .toList());
+        return history;
     }
 
     private DbGitCommandResult createAndCheckout(String branch) throws IOException {

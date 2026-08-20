@@ -16,12 +16,21 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 /** Shared JDBC metadata conversion, with small vendor adapters selecting their dialect and default schema. */
 public abstract class AbstractJdbcSchemaParser implements SchemaParser {
+    /** Type names whose precision/scale materially change the type - unlike e.g. INTEGER, whose reported COLUMN_SIZE is a fixed bit width, not something a DDL author chose. */
+    private static final Set<String> SIZED_TYPES = Set.of(
+            "CHAR", "VARCHAR", "CHARACTER", "CHARACTER VARYING", "NCHAR", "NVARCHAR",
+            "DECIMAL", "NUMERIC", "BIT", "VARBINARY", "BINARY");
+    /** Above this, a reported size is almost certainly a driver's "unbounded" sentinel (e.g. H2 reports TEXT as CHARACTER VARYING(1000000000)), not a real DDL-authored limit. */
+    private static final int MAX_DISPLAYED_SIZE = 100_000;
+
     protected abstract String dialect();
 
     @Override
@@ -56,7 +65,7 @@ public abstract class AbstractJdbcSchemaParser implements SchemaParser {
             while (columns.next()) {
                 String name = columns.getString("COLUMN_NAME");
                 columnsByName.put(name, new ColumnModel(
-                        columnId(tableId, name), name, columns.getString("TYPE_NAME"),
+                        columnId(tableId, name), name, nativeType(columns),
                         columns.getInt("ORDINAL_POSITION"),
                         columns.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls,
                         columns.getString("COLUMN_DEF")
@@ -126,6 +135,20 @@ public abstract class AbstractJdbcSchemaParser implements SchemaParser {
                                                StableId referencedTable, List<StableId> referencedColumns) {
         return new ConstraintModel(StableId.of("constraint", tableId.value() + "." + name), name, type, columns,
                 referencedTable, referencedColumns);
+    }
+
+    /** Reconstructs a DDL-like type signature (e.g. {@code NUMERIC(10,2)}) - JDBC's TYPE_NAME alone drops precision/scale. */
+    private static String nativeType(ResultSet columns) throws SQLException {
+        String typeName = columns.getString("TYPE_NAME");
+        int size = columns.getInt("COLUMN_SIZE");
+        boolean sized = !columns.wasNull() && size > 0 && size <= MAX_DISPLAYED_SIZE
+                && SIZED_TYPES.contains(typeName.toUpperCase(Locale.ROOT));
+        if (!sized) {
+            return typeName;
+        }
+        int digits = columns.getInt("DECIMAL_DIGITS");
+        boolean hasDigits = !columns.wasNull() && digits > 0;
+        return hasDigits ? typeName + "(" + size + "," + digits + ")" : typeName + "(" + size + ")";
     }
 
     private static StableId tableId(String schema, String table) {

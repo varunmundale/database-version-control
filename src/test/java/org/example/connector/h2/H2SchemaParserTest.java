@@ -48,7 +48,7 @@ class H2SchemaParserTest {
             assertEquals("PUBLIC", firstRead.schema());
             assertEquals(firstRead, secondRead);
             assertFalse(parentId.nullable());
-            assertEquals("CHARACTER VARYING", parentCode.nativeType());
+            assertEquals("CHARACTER VARYING(20)", parentCode.nativeType());
             assertEquals("'new'", parentCode.defaultValue());
             assertTrue(parent.constraints().stream().anyMatch(constraint -> constraint.type() == ConstraintType.PRIMARY_KEY));
             assertTrue(parent.constraints().stream().anyMatch(constraint -> constraint.type() == ConstraintType.UNIQUE));
