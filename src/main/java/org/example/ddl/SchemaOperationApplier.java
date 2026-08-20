@@ -41,9 +41,8 @@ public final class SchemaOperationApplier {
         }
         StableId tableId = StableId.of("table", schema + "." + op.tableName());
         List<ColumnModel> columns = new ArrayList<>();
-        int ordinal = 1;
         for (ColumnDefinition column : op.columns()) {
-            columns.add(newColumn(tableId, column, ordinal++));
+            columns.add(newColumn(tableId, column));
         }
         return new TableModel(tableId, schema, op.tableName(), columns, List.of(), List.of());
     }
@@ -53,9 +52,8 @@ public final class SchemaOperationApplier {
         if (existing.columns().stream().anyMatch(column -> column.name().equals(columnName))) {
             throw new IllegalArgumentException("Column already exists: " + columnName);
         }
-        int ordinal = existing.columns().stream().mapToInt(ColumnModel::ordinal).max().orElse(0) + 1;
         List<ColumnModel> columns = new ArrayList<>(existing.columns());
-        columns.add(newColumn(existing.id(), op.column(), ordinal));
+        columns.add(newColumn(existing.id(), op.column()));
         return withColumns(existing, columns);
     }
 
@@ -69,19 +67,19 @@ public final class SchemaOperationApplier {
         if (existing.columns().stream().anyMatch(column -> column.name().equals(op.newName()))) {
             throw new IllegalArgumentException("Column already exists: " + op.newName());
         }
-        ColumnModel renamed = new ColumnModel(target.id(), op.newName(), target.nativeType(), target.ordinal(), target.nullable(), target.defaultValue());
+        ColumnModel renamed = new ColumnModel(target.id(), op.newName(), target.nativeType(), target.nullable(), target.defaultValue());
         return withColumns(existing, replace(existing, target, renamed));
     }
 
     private TableModel alterColumnType(TableModel existing, SchemaOperation.AlterColumnType op) {
         ColumnModel target = columnOrThrow(existing, op.columnName());
-        ColumnModel updated = new ColumnModel(target.id(), target.name(), op.newType(), target.ordinal(), target.nullable(), target.defaultValue());
+        ColumnModel updated = new ColumnModel(target.id(), target.name(), op.newType(), target.nullable(), target.defaultValue());
         return withColumns(existing, replace(existing, target, updated));
     }
 
-    private static ColumnModel newColumn(StableId tableId, ColumnDefinition definition, int ordinal) {
+    private static ColumnModel newColumn(StableId tableId, ColumnDefinition definition) {
         StableId columnId = StableId.of("column", tableId.value() + "." + definition.name());
-        return new ColumnModel(columnId, definition.name(), definition.nativeType(), ordinal, definition.nullable(), definition.defaultValue());
+        return new ColumnModel(columnId, definition.name(), definition.nativeType(), definition.nullable(), definition.defaultValue());
     }
 
     private static ColumnModel columnOrThrow(TableModel table, String columnName) {

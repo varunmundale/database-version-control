@@ -24,9 +24,7 @@ class SchemaOperationApplierTest {
 
         assertEquals("orders", table.name());
         assertEquals("public", table.schema());
-        assertEquals(2, table.columns().size());
-        assertEquals(1, table.columns().get(0).ordinal());
-        assertEquals(2, table.columns().get(1).ordinal());
+        assertEquals(List.of("id", "total"), table.columns().stream().map(ColumnModel::name).toList());
     }
 
     @Test
@@ -50,15 +48,13 @@ class SchemaOperationApplierTest {
     }
 
     @Test
-    void addColumnGivesTheNewColumnAFreshStableIdAndTheNextOrdinal() {
+    void addColumnGivesTheNewColumnAFreshStableIdAndAppendsIt() {
         TableModel existing = table("id");
 
         TableModel updated = applier.apply("public", new SchemaOperation.AddColumn("orders",
                 new ColumnDefinition("total", "NUMERIC(10,2)", true, null)), existing);
 
-        assertEquals(2, updated.columns().size());
-        ColumnModel total = column(updated, "total");
-        assertEquals(2, total.ordinal());
+        assertEquals(List.of("id", "total"), updated.columns().stream().map(ColumnModel::name).toList());
     }
 
     @Test
@@ -88,7 +84,7 @@ class SchemaOperationApplierTest {
     }
 
     @Test
-    void renameColumnPreservesTheStableIdOrdinalTypeAndNullability() {
+    void renameColumnPreservesTheStableIdTypeAndNullability() {
         TableModel existing = table("id", "note");
         ColumnModel note = column(existing, "note");
 
@@ -96,7 +92,6 @@ class SchemaOperationApplierTest {
 
         ColumnModel memo = column(updated, "memo");
         assertEquals(note.id(), memo.id());
-        assertEquals(note.ordinal(), memo.ordinal());
         assertEquals(note.nativeType(), memo.nativeType());
         assertEquals(note.nullable(), memo.nullable());
         assertTrue(updated.columns().stream().noneMatch(column -> column.name().equals("note")));
@@ -111,7 +106,7 @@ class SchemaOperationApplierTest {
     }
 
     @Test
-    void alterColumnTypeChangesTheTypeButKeepsIdNameAndOrdinal() {
+    void alterColumnTypeChangesTheTypeButKeepsIdAndName() {
         TableModel existing = table("id", "col1");
         ColumnModel col1 = column(existing, "col1");
 
@@ -119,7 +114,6 @@ class SchemaOperationApplierTest {
 
         ColumnModel updatedCol1 = column(updated, "col1");
         assertEquals(col1.id(), updatedCol1.id());
-        assertEquals(col1.ordinal(), updatedCol1.ordinal());
         assertEquals("BIGINT", updatedCol1.nativeType());
     }
 

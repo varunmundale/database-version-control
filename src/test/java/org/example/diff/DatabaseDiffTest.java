@@ -11,46 +11,49 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.example.diff.SchemaDiff.Side.CONFLICT;
-import static org.example.diff.SchemaDiff.Side.LEFT;
-import static org.example.diff.SchemaDiff.Side.RIGHT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class SchemaDiffTest {
+class DatabaseDiffTest {
     private final SchemaReplayer replayer = new SchemaReplayer();
+    private final DatabaseDiff databaseDiff = new DatabaseDiff();
     private long idSequence = 1;
 
     @Test
     void identicalSchemasHaveNoDifferences() {
         TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(orders), List.of(orders));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(orders), List.of(orders));
 
-        assertTrue(entries.isEmpty());
+        assertTrue(tableDiffs.isEmpty());
     }
 
     @Test
     void tableOnlyOnLeftReportsTheTableAndEachColumnAsLeft() {
         TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(orders), List.of());
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(orders), List.of());
 
-        assertEquals(3, entries.size());
-        assertTrue(entries.stream().allMatch(entry -> entry.side() == LEFT));
-        assertTrue(entries.stream().anyMatch(entry -> entry.description().equals("table orders")));
-        assertTrue(entries.stream().anyMatch(entry -> entry.description().equals("column orders.id")));
-        assertTrue(entries.stream().anyMatch(entry -> entry.description().equals("column orders.total")));
+        assertEquals(1, tableDiffs.size());
+        TableDiff tableDiff = tableDiffs.getFirst();
+        assertEquals("orders", tableDiff.tableName());
+        assertTrue(tableDiff.onlyOnLeft());
+        assertFalse(tableDiff.onlyOnRight());
+        assertEquals(2, tableDiff.columnDiffs().size());
+        assertTrue(tableDiff.columnDiffs().stream().allMatch(column -> column.side() == Side.LEFT));
+        assertEquals(List.of("id", "total"), tableDiff.columnDiffs().stream().map(ColumnDiff::columnName).toList());
     }
 
     @Test
     void tableOnlyOnRightReportsTheTableAndEachColumnAsRight() {
         TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY);");
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(), List.of(orders));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(), List.of(orders));
 
-        assertEquals(2, entries.size());
-        assertTrue(entries.stream().allMatch(entry -> entry.side() == RIGHT));
+        TableDiff tableDiff = tableDiffs.getFirst();
+        assertTrue(tableDiff.onlyOnRight());
+        assertTrue(tableDiff.columnDiffs().stream().allMatch(column -> column.side() == Side.RIGHT));
     }
 
     @Test
@@ -60,11 +63,17 @@ class SchemaDiffTest {
                 "ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
         // right's 'total' has a different type than left's - same stable id, different definition.
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(left), List.of(right));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(left), List.of(right));
 
-        assertEquals(1, entries.size());
-        assertEquals(CONFLICT, entries.getFirst().side());
-        assertTrue(entries.getFirst().description().startsWith("column orders.total"));
+        assertEquals(1, tableDiffs.size());
+        TableDiff tableDiff = tableDiffs.getFirst();
+        assertFalse(tableDiff.onlyOnLeft());
+        assertFalse(tableDiff.onlyOnRight());
+        assertEquals(1, tableDiff.columnDiffs().size());
+        ColumnDiff columnDiff = tableDiff.columnDiffs().getFirst();
+        assertEquals(Side.CONFLICT, columnDiff.side());
+        assertEquals("total", columnDiff.columnName());
+        assertFalse(columnDiff.isRename());
     }
 
     @Test
@@ -72,11 +81,11 @@ class SchemaDiffTest {
         TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
         TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);");
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(left), List.of(right));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(left), List.of(right));
 
-        assertEquals(1, entries.size());
-        assertEquals(LEFT, entries.getFirst().side());
-        assertEquals("column orders.total", entries.getFirst().description());
+        ColumnDiff columnDiff = tableDiffs.getFirst().columnDiffs().getFirst();
+        assertEquals(Side.LEFT, columnDiff.side());
+        assertEquals("total", columnDiff.columnName());
     }
 
     @Test
@@ -87,38 +96,42 @@ class SchemaDiffTest {
         Map<String, TableModel> modifiedSide = replayer.replay(List.of(
                 changeset(createOrders), changeset("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;")));
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(renamedSide.values(), modifiedSide.values());
+        List<TableDiff> tableDiffs = databaseDiff.diff(renamedSide.values(), modifiedSide.values());
 
-        assertEquals(1, entries.size());
-        assertEquals(CONFLICT, entries.getFirst().side());
-        assertTrue(entries.getFirst().description().contains("col2"));
-        assertTrue(entries.getFirst().description().contains("col1"));
+        assertEquals(1, tableDiffs.size());
+        ColumnDiff columnDiff = tableDiffs.getFirst().columnDiffs().getFirst();
+        assertEquals(Side.CONFLICT, columnDiff.side());
+        assertTrue(columnDiff.isRename());
+        assertEquals("col2", columnDiff.left().name());
+        assertEquals("col1", columnDiff.right().name());
+        assertEquals(columnDiff.left().id(), columnDiff.right().id());
     }
 
     @Test
-    void columnEntriesWithinATableAreOrderedByColumnName() {
+    void columnDiffsWithinATableAreOrderedByColumnName() {
         TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, zeta TEXT, alpha TEXT, mid TEXT);");
         TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);");
-        // zeta, alpha and mid are each LEFT-only entries; output should read alpha, mid, zeta - not creation order.
+        // zeta, alpha and mid are each LEFT-only diffs; output should read alpha, mid, zeta - not creation order.
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(left), List.of(right));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(left), List.of(right));
 
-        assertEquals(List.of("column orders.alpha", "column orders.mid", "column orders.zeta"),
-                entries.stream().map(SchemaDiff.Entry::description).toList());
+        assertEquals(List.of("alpha", "mid", "zeta"),
+                tableDiffs.getFirst().columnDiffs().stream().map(ColumnDiff::columnName).toList());
     }
 
     @Test
-    void eachTableIsDiffedIndependentlyAndResultsAreOrderedByTableNameThenColumnName() {
+    void eachTableIsDiffedIndependentlyAndResultsAreOrderedByTableName() {
         TableModel zebras = table("CREATE TABLE zebras (id INT PRIMARY KEY, total NUMERIC(10,2));");
         TableModel accounts = table("CREATE TABLE accounts (id INT PRIMARY KEY, total NUMERIC(10,2));");
         TableModel zebrasChanged = table("CREATE TABLE zebras (id INT PRIMARY KEY);", "ALTER TABLE zebras ADD COLUMN total INT NOT NULL;");
         TableModel accountsChanged = table("CREATE TABLE accounts (id INT PRIMARY KEY);", "ALTER TABLE accounts ADD COLUMN total INT NOT NULL;");
 
-        List<SchemaDiff.Entry> entries = SchemaDiff.diff(List.of(zebras, accounts), List.of(zebrasChanged, accountsChanged));
+        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(zebras, accounts), List.of(zebrasChanged, accountsChanged));
 
         // "accounts" sorts before "zebras" even though "zebras" was added to the input lists first.
-        assertEquals(List.of("column accounts.total", "column zebras.total"),
-                entries.stream().map(SchemaDiff.Entry::description).map(d -> d.split(" \\(")[0]).toList());
+        assertEquals(List.of("accounts", "zebras"), tableDiffs.stream().map(TableDiff::tableName).toList());
+        assertEquals(2, tableDiffs.size());
+        assertTrue(tableDiffs.stream().allMatch(t -> t.columnDiffs().size() == 1));
     }
 
     private ChangeSet changeset(String ddl) {
