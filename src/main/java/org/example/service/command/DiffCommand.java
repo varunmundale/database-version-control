@@ -1,8 +1,8 @@
 package org.example.service.command;
 
-import org.example.diff.DatabaseDiff;
-import org.example.diff.HistoryDiffFormatter;
-import org.example.model.versioning.ChangeSet;
+import org.example.core.DatabaseDiff;
+import org.example.core.HistoryDiffFormatter;
+import org.example.models.versioning.ChangeSet;
 import org.example.service.DbGitCommandResult;
 import org.example.versioning.BranchMetadataStore;
 

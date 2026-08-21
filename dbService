@@ -3,4 +3,4 @@
 # terminal (in the same working directory) to send it commands.
 set -euo pipefail
 cd "$(dirname "$0")"
-exec mvn -q exec:java -Dexec.mainClass=org.example.server.DbServiceMain
+exec mvn -q exec:java -Dexec.mainClass=org.example.service.DbServiceMain

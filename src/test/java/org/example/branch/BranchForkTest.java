@@ -1,12 +1,14 @@
 package org.example.branch;
 
+import org.example.branch.docker.CommandResult;
+import org.example.branch.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
-import org.example.connector.ConnectorFactory;
-import org.example.connector.SqlConnector;
-import org.example.connector.SqlExecutionResult;
-import org.example.connector.SqlTransaction;
-import org.example.model.versioning.ChangeSet;
-import org.example.model.versioning.ChangesetStatus;
+import org.example.connectors.ConnectorFactory;
+import org.example.connectors.SqlConnector;
+import org.example.connectors.SqlExecutionResult;
+import org.example.connectors.SqlTransaction;
+import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.ChangesetStatus;
 import org.example.versioning.BranchMetadataStore;
 import org.junit.jupiter.api.Test;
 
@@ -204,6 +206,11 @@ class BranchForkTest {
 
         @Override
         public long commit(String branch, List<Long> changesetIds) {
+            return nextId++;
+        }
+
+        @Override
+        public long createMergeCommit(String branch, String otherBranch) {
             return nextId++;
         }
     }

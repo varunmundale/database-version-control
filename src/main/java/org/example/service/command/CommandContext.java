@@ -2,7 +2,7 @@ package org.example.service.command;
 
 import org.example.branch.BranchFork;
 import org.example.branch.DbGitRepository;
-import org.example.replay.SchemaReplayer;
+import org.example.core.SchemaReplayer;
 
 import java.util.Objects;
 

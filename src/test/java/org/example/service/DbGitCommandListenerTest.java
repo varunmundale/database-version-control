@@ -1,4 +1,4 @@
-package org.example.client;
+package org.example.service;
 
 import org.example.branch.BranchFork;
 import org.example.branch.docker.CommandResult;
@@ -10,19 +10,19 @@ import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
-import org.example.service.DbGitCommandListener;
-import org.example.service.DbGitService;
 import org.example.versioning.BranchMetadataStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintStream;
-import java.net.ServerSocket;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DbGitClientTest {
+class DbGitCommandListenerTest {
     @TempDir
     Path workingDirectory;
 
@@ -67,63 +67,73 @@ class DbGitClientTest {
     }
 
     @Test
-    void printsCommandOutputAndReturnsSuccessExitCode() {
-        DbGitClient client = new DbGitClient(listener.port());
-        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
-        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+    void createsAndChecksOutBranchesOverTheSocket() throws IOException {
+        Response createResponse = send("dbgit checkout -b feature/orders");
+        assertEquals("OK", createResponse.status);
+        assertEquals(List.of("Switched to a new branch 'feature/orders'."), createResponse.body);
+        assertEquals("feature/orders", Files.readString(workingDirectory.resolve(".dbgit/HEAD")).trim());
 
-        int exitCode = client.run(List.of("checkout", "-b", "feature/orders"), printStream(outBytes), printStream(errBytes));
+        Response checkoutResponse = send("dbgit checkout main");
+        assertEquals("OK", checkoutResponse.status);
+        assertEquals(List.of("Switched to branch 'main'."), checkoutResponse.body);
 
-        assertEquals(0, exitCode);
-        assertEquals("Switched to a new branch 'feature/orders'." + System.lineSeparator(), outBytes.toString(StandardCharsets.UTF_8));
-        assertEquals("", errBytes.toString(StandardCharsets.UTF_8));
+        Response branchResponse = send("dbgit branch");
+        assertEquals("OK", branchResponse.status);
+        assertEquals(List.of("  feature/orders", "* main"), branchResponse.body);
     }
 
     @Test
-    void printsErrorsToStderrAndReturnsFailureExitCode() {
-        DbGitClient client = new DbGitClient(listener.port());
-        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
-        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+    void reportsUsageErrorsAsErrStatus() throws IOException {
+        Response response = send("dbgit checkout unknown-branch");
 
-        int exitCode = client.run(List.of("checkout", "unknown-branch"), printStream(outBytes), printStream(errBytes));
-
-        assertEquals(1, exitCode);
-        assertEquals("", outBytes.toString(StandardCharsets.UTF_8));
-        assertTrue(errBytes.toString(StandardCharsets.UTF_8).contains("Unknown branch"));
+        assertEquals("ERR", response.status);
+        assertTrue(response.body.get(0).contains("Unknown branch"));
     }
 
     @Test
-    void reportsWhenDbServiceIsNotRunning() throws IOException {
-        int freePort;
-        try (ServerSocket probe = new ServerSocket(0)) {
-            freePort = probe.getLocalPort();
+    void appliesAMultilineDdlStatementAndRecordsAChangesetOverTheSocket() throws IOException {
+        Response response = sendAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);");
+
+        assertEquals("OK", response.status);
+        assertEquals(List.of("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)."), response.body);
+    }
+
+    private Response send(String commandLine) throws IOException {
+        try (Socket socket = new Socket("localhost", listener.port())) {
+            try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println(commandLine);
+                socket.shutdownOutput();
+
+                return readResponse(socket);
+            }
         }
-        DbGitClient client = new DbGitClient(freePort);
-        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
-        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
-
-        int exitCode = client.run(List.of("branch"), printStream(outBytes), printStream(errBytes));
-
-        assertEquals(1, exitCode);
-        assertTrue(errBytes.toString(StandardCharsets.UTF_8).contains("dbService is not running"));
     }
 
-    @Test
-    void sendsAMultilineDdlStatementAndReportsTheRecordedChangeset() {
-        DbGitClient client = new DbGitClient(listener.port());
-        ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
-        ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
+    private Response sendAdd(String ddl) throws IOException {
+        try (Socket socket = new Socket("localhost", listener.port())) {
+            try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println("dbgit add");
+                writer.print(ddl);
+                writer.flush();
+                socket.shutdownOutput();
 
-        int exitCode = client.runAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);", printStream(outBytes), printStream(errBytes));
-
-        assertEquals(0, exitCode);
-        assertEquals("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)." + System.lineSeparator(),
-                outBytes.toString(StandardCharsets.UTF_8));
-        assertEquals("", errBytes.toString(StandardCharsets.UTF_8));
+                return readResponse(socket);
+            }
+        }
     }
 
-    private static PrintStream printStream(ByteArrayOutputStream bytes) {
-        return new PrintStream(bytes, true, StandardCharsets.UTF_8);
+    private static Response readResponse(Socket socket) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+        String status = reader.readLine();
+        List<String> body = new ArrayList<>();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            body.add(line);
+        }
+        return new Response(status, body);
+    }
+
+    private record Response(String status, List<String> body) {
     }
 
     private static final class RecordingRunner implements CommandRunner {

@@ -1,6 +1,6 @@
 package org.example.versioning;
 
-import org.example.model.versioning.ChangeSet;
+import org.example.models.versioning.ChangeSet;
 
 import java.util.List;
 
@@ -30,4 +30,12 @@ public interface BranchMetadataStore {
      * currently APPLIED are silently skipped. Returns the new commit's id.
      */
     long commit(String branch, List<Long> changesetIds);
+
+    /**
+     * Creates a merge commit for {@code branch}: chains its current HEAD as the first parent and
+     * {@code otherBranch}'s current HEAD as the second parent. Carries no changesets of its own - the changesets it
+     * brings in stay attributed to the commits that originally introduced them, reachable by walking both parent
+     * chains. Moves {@code branch}'s HEAD to the new commit. Returns the new commit's id.
+     */
+    long createMergeCommit(String branch, String otherBranch);
 }

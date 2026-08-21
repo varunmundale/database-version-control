@@ -1,0 +1,37 @@
+package org.example.service.command;
+
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * Turns a raw {@code dbgit} command line's arguments into the matching {@link Command}. Owns command dispatch (the
+ * shape each subcommand's argument list takes); each command's own behavior lives in its {@link Command} subclass.
+ */
+public final class CommandFactory {
+    private final CommandContext context;
+
+    public CommandFactory(CommandContext context) {
+        this.context = Objects.requireNonNull(context, "context must not be null");
+    }
+
+    public Command create(List<String> arguments) {
+        if (arguments.equals(List.of("dbgit", "branch"))) {
+            return new BranchCommand(context);
+        }
+        if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("checkout")) {
+            return new CheckoutCommand(context, arguments.subList(2, arguments.size()));
+        }
+        if (arguments.equals(List.of("dbgit", "commit"))) {
+            return new CommitCommand(context);
+        }
+        if (arguments.size() == 4 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("diff")) {
+            return new DiffCommand(context, arguments.get(2), arguments.get(3));
+        }
+        if (arguments.size() == 3 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("merge")) {
+            return new MergeCommand(context, arguments.get(2));
+        }
+        throw new IllegalArgumentException(
+                "Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add | dbgit commit "
+                        + "| dbgit diff <branch1> <branch2> | dbgit merge <branch>");
+    }
+}

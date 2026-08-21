@@ -1,19 +1,23 @@
 package org.example.versioning;
 
 import org.example.config.ConnectionSettings;
-import org.example.connector.ConnectorFactory;
-import org.example.connector.SqlConnector;
-import org.example.connector.SqlExecutionResult;
-import org.example.model.versioning.ChangeSet;
-import org.example.model.versioning.ChangesetStatus;
+import org.example.connectors.ConnectorFactory;
+import org.example.connectors.SqlConnector;
+import org.example.connectors.SqlExecutionResult;
+import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.ChangesetStatus;
 
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Stores branch, changeset and commit metadata in a standalone PostgreSQL server, separate from the branch databases themselves. */
@@ -76,15 +80,67 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
     @Override
     public List<ChangeSet> commitHistory(String branch) {
         ensureSchema();
-        SqlExecutionResult result = execute("WITH RECURSIVE chain AS ("
-                + "SELECT id, parent_commit_id, 0 AS depth FROM branch_commits "
-                + "WHERE id = (SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch) + ") "
-                + "UNION ALL "
-                + "SELECT c.id, c.parent_commit_id, chain.depth + 1 FROM branch_commits c JOIN chain ON c.id = chain.parent_commit_id"
-                + ") SELECT bc.id, bc.ddl, bc.status, bc.applied_at FROM branch_changesets bc "
-                + "JOIN chain ON bc.commit_id = chain.id "
-                + "ORDER BY chain.depth DESC, bc.id ASC");
-        return toChangesets(branch, result);
+        Long headCommitId = headCommitId(branch);
+        if (headCommitId == null) {
+            return List.of();
+        }
+
+        Map<Long, Long[]> parentsById = commitParents();
+        List<Long> order = new ArrayList<>();
+        collectAncestryOrder(headCommitId, parentsById, new LinkedHashSet<>(), order);
+
+        String commitIds = order.stream().map(String::valueOf).collect(Collectors.joining(", "));
+        SqlExecutionResult result = execute("SELECT id, ddl, status, applied_at, commit_id FROM branch_changesets "
+                + "WHERE commit_id IN (" + commitIds + ") ORDER BY id");
+        Map<Long, List<ChangeSet>> changesetsByCommit = new LinkedHashMap<>();
+        for (Map<String, Object> row : result.rows()) {
+            long commitId = ((Number) row.get("commit_id")).longValue();
+            changesetsByCommit.computeIfAbsent(commitId, unused -> new ArrayList<>()).add(new ChangeSet(
+                    ((Number) row.get("id")).longValue(),
+                    branch,
+                    String.valueOf(row.get("ddl")),
+                    ChangesetStatus.valueOf(String.valueOf(row.get("status"))),
+                    toInstant(row.get("applied_at"))));
+        }
+
+        List<ChangeSet> history = new ArrayList<>();
+        for (Long commitId : order) {
+            history.addAll(changesetsByCommit.getOrDefault(commitId, List.of()));
+        }
+        return history;
+    }
+
+    private Map<Long, Long[]> commitParents() {
+        SqlExecutionResult result = execute("SELECT id, parent_commit_id, second_parent_commit_id FROM branch_commits");
+        Map<Long, Long[]> parents = new HashMap<>();
+        for (Map<String, Object> row : result.rows()) {
+            long id = ((Number) row.get("id")).longValue();
+            parents.put(id, new Long[] {toLong(row.get("parent_commit_id")), toLong(row.get("second_parent_commit_id"))});
+        }
+        return parents;
+    }
+
+    /**
+     * Walks a commit's ancestry in the order its schema was actually built up: the first parent's full history,
+     * then anything reachable only through the second parent (a merge commit's contribution), then the commit
+     * itself - mirroring how {@code createMergeCommit} physically replayed the second branch's diverged changesets
+     * on top of the first's. A commit already {@code seen} (a common ancestor reached through both parents) is not
+     * revisited, so it stays at its original position instead of being duplicated.
+     */
+    private static void collectAncestryOrder(Long commitId, Map<Long, Long[]> parentsById, Set<Long> seen, List<Long> order) {
+        if (commitId == null || seen.contains(commitId)) {
+            return;
+        }
+        Long[] parents = parentsById.get(commitId);
+        collectAncestryOrder(parents[0], parentsById, seen, order);
+        collectAncestryOrder(parents[1], parentsById, seen, order);
+        if (seen.add(commitId)) {
+            order.add(commitId);
+        }
+    }
+
+    private static Long toLong(Object value) {
+        return value == null ? null : ((Number) value).longValue();
     }
 
     @Override
@@ -118,8 +174,45 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
         return commitId;
     }
 
+    @Override
+    public long createMergeCommit(String branch, String otherBranch) {
+        ensureSchema();
+        try (SqlConnector connector = connectorFactory.connect(settings)) {
+            Long commitId = connector.transaction(txn -> doMergeCommit(txn, branch, otherBranch));
+            return commitId;
+        } catch (SQLException exception) {
+            throw new MetadataStoreException("Could not create merge commit for branch '" + branch + "': " + exception.getMessage(), exception);
+        }
+    }
+
+    /** Runs as a single transaction: the new two-parent commit row, both parents' forward pointers, and the branch's head must all move together. */
+    private long doMergeCommit(SqlConnector txn, String branch, String otherBranch) throws SQLException {
+        Long firstParent = headCommitId(txn, branch);
+        Long secondParent = headCommitId(txn, otherBranch);
+        if (secondParent == null) {
+            throw new MetadataStoreException("Branch '" + otherBranch + "' has no commits to merge.");
+        }
+        SqlExecutionResult insertResult = txn.execute("INSERT INTO branch_commits (parent_commit_id, second_parent_commit_id) VALUES ("
+                + (firstParent == null ? "NULL" : firstParent) + ", " + secondParent + ") RETURNING id");
+        long commitId = id(insertResult);
+
+        if (firstParent != null) {
+            txn.execute("UPDATE branch_commits SET next_commit_id = " + commitId + " WHERE id = " + firstParent);
+        }
+        txn.execute("UPDATE branch_commits SET next_commit_id = " + commitId + " WHERE id = " + secondParent);
+        txn.execute("UPDATE branch_metadata SET head_commit_id = " + commitId + " WHERE branch_name = " + quote(branch));
+        return commitId;
+    }
+
+    private Long headCommitId(String branch) {
+        return extractHeadCommitId(execute("SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch)));
+    }
+
     private Long headCommitId(SqlConnector txn, String branch) throws SQLException {
-        SqlExecutionResult result = txn.execute("SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch));
+        return extractHeadCommitId(txn.execute("SELECT head_commit_id FROM branch_metadata WHERE branch_name = " + quote(branch)));
+    }
+
+    private static Long extractHeadCommitId(SqlExecutionResult result) {
         if (result == null || result.rows().isEmpty()) {
             return null;
         }
@@ -143,6 +236,7 @@ public final class PostgresBranchMetadataStore implements BranchMetadataStore {
                 + "id BIGSERIAL PRIMARY KEY, "
                 + "parent_commit_id BIGINT REFERENCES branch_commits(id), next_commit_id BIGINT REFERENCES branch_commits(id), "
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "
+                + "ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS second_parent_commit_id BIGINT REFERENCES branch_commits(id); "
                 + "CREATE TABLE IF NOT EXISTS branch_metadata ("
                 + "branch_name TEXT PRIMARY KEY, forked_from TEXT, head_commit_id BIGINT REFERENCES branch_commits(id), "
                 + "created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP); "

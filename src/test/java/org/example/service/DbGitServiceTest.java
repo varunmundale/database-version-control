@@ -1,15 +1,15 @@
 package org.example.service;
 
 import org.example.branch.BranchFork;
-import org.example.branch.CommandResult;
-import org.example.branch.CommandRunner;
+import org.example.branch.docker.CommandResult;
+import org.example.branch.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
-import org.example.connector.ConnectorFactory;
-import org.example.connector.SqlConnector;
-import org.example.connector.SqlExecutionResult;
-import org.example.connector.SqlTransaction;
-import org.example.model.versioning.ChangeSet;
-import org.example.model.versioning.ChangesetStatus;
+import org.example.connectors.ConnectorFactory;
+import org.example.connectors.SqlConnector;
+import org.example.connectors.SqlExecutionResult;
+import org.example.connectors.SqlTransaction;
+import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.ChangesetStatus;
 import org.example.versioning.BranchMetadataStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,9 +19,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -225,6 +225,111 @@ class DbGitServiceTest {
     }
 
     @Test
+    void mergeAppliesTheOtherBranchsDivergedChangesetsAndRecordsATwoParentCommit() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, connectorFactory, metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+        String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);";
+        service.add(alter);
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout main");
+
+        DbGitCommandResult result = service.execute("dbgit merge feature/orders");
+
+        assertEquals(List.of(
+                "Merged 'feature/orders' into 'main' as commit #3, applying 1 changeset(s).",
+                "Validated via staging branch 'merge/main-feature/orders'."
+        ), result.lines());
+        assertTrue(metadataStore.branches().contains("merge/main-feature/orders"));
+
+        List<ChangeSet> mainHistory = metadataStore.commitHistory("main");
+        assertEquals(2, mainHistory.size());
+        assertEquals("CREATE TABLE orders (id INT PRIMARY KEY);", mainHistory.get(0).ddl());
+        assertEquals(alter, mainHistory.get(1).ddl());
+
+        // The alter ran once when originally staged on feature/orders, then again for real against both the
+        // staging branch's scratch database and main's own live database while merging.
+        List<String> databasesAlterRanAgainst = connectorFactory.executed.stream()
+                .filter(pair -> pair[1].equals(alter))
+                .map(pair -> pair[0])
+                .toList();
+        assertEquals(3, databasesAlterRanAgainst.size());
+        assertTrue(databasesAlterRanAgainst.contains("feature_orders_postgres"));
+        assertTrue(databasesAlterRanAgainst.contains("postgres"));
+        assertTrue(databasesAlterRanAgainst.stream().anyMatch(database -> database.startsWith("merge_main-feature_orders")));
+
+        assertEquals(List.of("No differences between 'main' and 'feature/orders'."),
+                service.execute("dbgit diff main feature/orders").lines());
+    }
+
+    @Test
+    void mergeRejectsWhenBothBranchesConflictOnTheSameColumn() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+        service.add("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout main");
+        service.add("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
+        service.execute("dbgit commit");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.execute("dbgit merge feature/orders"));
+
+        assertTrue(exception.getMessage().contains("conflicting changes"));
+        assertTrue(exception.getMessage().contains("orders"));
+        assertTrue(exception.getMessage().contains("total"));
+        // No staging branch or merge commit is created once a conflict is found.
+        assertTrue(metadataStore.branches().stream().noneMatch(branch -> branch.startsWith("merge/")));
+        assertEquals(2, metadataStore.commitHistory("main").size());
+    }
+
+    @Test
+    void mergeReportsAlreadyUpToDateWhenTheOtherBranchHasNothingNew() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitService service = new DbGitService(workingDirectory, new BranchFork(runner, new RecordingConnectorFactory(), metadataStore));
+        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        service.execute("dbgit commit");
+        service.execute("dbgit checkout -b feature/orders");
+        service.execute("dbgit checkout main");
+
+        DbGitCommandResult result = service.execute("dbgit merge feature/orders");
+
+        assertEquals(List.of("Already up to date."), result.lines());
+        assertTrue(metadataStore.branches().stream().noneMatch(branch -> branch.startsWith("merge/")));
+    }
+
+    @Test
+    void mergeRefusesAnUnknownBranch() {
+        DbGitService service = new DbGitService(workingDirectory,
+                new BranchFork(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.execute("dbgit merge unknown-branch"));
+
+        assertTrue(exception.getMessage().contains("Unknown branch"));
+    }
+
+    @Test
+    void mergeRefusesMergingABranchIntoItself() {
+        DbGitService service = new DbGitService(workingDirectory,
+                new BranchFork(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> service.execute("dbgit merge main"));
+
+        assertTrue(exception.getMessage().contains("itself"));
+    }
+
+    @Test
     void forkedBranchesSharePriorCommitHistoryWithoutCreatingNewCommits() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
@@ -302,11 +407,37 @@ class DbGitServiceTest {
         }
     }
 
+    /** Records every statement executed against every database, keyed by database name - unlike {@link RecordingConnectorFactory}, which only remembers the last one. */
+    private static final class MultiRecordingConnectorFactory implements ConnectorFactory {
+        private final List<String[]> executed = new ArrayList<>();
+
+        @Override
+        public SqlConnector connect(ConnectionSettings settings) {
+            return new SqlConnector() {
+                @Override
+                public SqlExecutionResult execute(String sql) {
+                    executed.add(new String[] {settings.database(), sql});
+                    return new SqlExecutionResult(false, 0, List.of());
+                }
+
+                @Override
+                public <T> T transaction(SqlTransaction<T> work) throws java.sql.SQLException {
+                    return work.execute(this);
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+        }
+    }
+
     private static final class InMemoryMetadataStore implements BranchMetadataStore {
         private final TreeSet<String> branches = new TreeSet<>(Set.of("main"));
         private final Map<Long, ChangeSet> changesetsById = new LinkedHashMap<>();
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
         private final Map<Long, Long> parentCommitById = new HashMap<>();
+        private final Map<Long, Long> secondParentCommitById = new HashMap<>();
         private final Map<String, Long> headCommitByBranch = new HashMap<>();
         private final AtomicLong nextChangesetId = new AtomicLong(1);
         private final AtomicLong nextCommitId = new AtomicLong(1);
@@ -346,20 +477,31 @@ class DbGitServiceTest {
 
         @Override
         public List<ChangeSet> commitHistory(String branch) {
-            List<Long> chain = new ArrayList<>();
-            Long current = headCommitByBranch.get(branch);
-            while (current != null) {
-                chain.add(current);
-                current = parentCommitById.get(current);
-            }
-            Collections.reverse(chain);
+            List<Long> order = new ArrayList<>();
+            collectOrder(headCommitByBranch.get(branch), new LinkedHashSet<>(), order);
             List<ChangeSet> history = new ArrayList<>();
-            for (long commitId : chain) {
+            for (long commitId : order) {
                 for (long changesetId : changesetIdsByCommit.getOrDefault(commitId, List.of())) {
                     history.add(changesetsById.get(changesetId));
                 }
             }
             return history;
+        }
+
+        /**
+         * Walks a commit's ancestry via both parents (first parent's full history, then anything reachable only
+         * through the second parent, then the commit itself), skipping a commit already visited so a common
+         * ancestor shared by both parents of a merge is emitted exactly once, at its original position.
+         */
+        private void collectOrder(Long commitId, Set<Long> seen, List<Long> order) {
+            if (commitId == null || seen.contains(commitId)) {
+                return;
+            }
+            collectOrder(parentCommitById.get(commitId), seen, order);
+            collectOrder(secondParentCommitById.get(commitId), seen, order);
+            if (seen.add(commitId)) {
+                order.add(commitId);
+            }
         }
 
         @Override
@@ -375,6 +517,15 @@ class DbGitServiceTest {
                 ChangeSet changeset = changesetsById.get(id);
                 changesetsById.put(id, new ChangeSet(changeset.id(), changeset.branch(), changeset.ddl(), ChangesetStatus.COMMIT, changeset.appliedAt()));
             }
+            return commitId;
+        }
+
+        @Override
+        public long createMergeCommit(String branch, String otherBranch) {
+            long commitId = nextCommitId.getAndIncrement();
+            parentCommitById.put(commitId, headCommitByBranch.get(branch));
+            secondParentCommitById.put(commitId, headCommitByBranch.get(otherBranch));
+            headCommitByBranch.put(branch, commitId);
             return commitId;
         }
     }

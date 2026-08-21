@@ -1,17 +1,19 @@
 package org.example.branch;
 
+import org.example.branch.docker.CommandRunner;
+import org.example.branch.docker.ProcessCommandRunner;
+import org.example.branch.docker.SharedPostgresContainer;
 import org.example.config.BranchDatabaseConfig;
 import org.example.config.ConnectionSettings;
 import org.example.config.MetadataStoreConfig;
-import org.example.connector.ConnectorFactory;
-import org.example.connector.SqlConnector;
-import org.example.connector.spi.ConnectorRegistry;
-import org.example.model.versioning.ChangeSet;
-import org.example.replay.DatabaseRecreator;
+import org.example.connectors.ConnectorFactory;
+import org.example.connectors.SqlConnector;
+import org.example.connectors.spi.ConnectorRegistry;
+import org.example.models.versioning.ChangeSet;
+import org.example.core.DatabaseRecreator;
 import org.example.versioning.BranchMetadataStore;
 import org.example.versioning.PostgresBranchMetadataStore;
 
-import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
@@ -20,15 +22,13 @@ import java.util.regex.Pattern;
 /** Forks a branch's database into one persistent PostgreSQL Docker container, recreating it from the parent's commit history. */
 public final class BranchFork {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
-    private static final int CONTAINER_PORT = 5432;
-    private static final int READY_ATTEMPTS = 20;
     private static final String POSTGRES_LOGICAL_NAME = "postgres";
     private static final String DEFAULT_BRANCH = "main";
 
-    private final CommandRunner commandRunner;
     private final BranchDatabaseConfig config;
     private final ConnectorFactory connectorFactory;
     private final BranchMetadataStore metadataStore;
+    private final SharedPostgresContainer sharedContainer;
     private final DatabaseRecreator databaseRecreator = new DatabaseRecreator();
 
     public BranchFork() {
@@ -44,10 +44,11 @@ public final class BranchFork {
     }
 
     public BranchFork(CommandRunner commandRunner, ConnectorFactory connectorFactory, BranchMetadataStore metadataStore) {
-        this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
         this.config = BranchDatabaseConfig.getInstance();
         this.connectorFactory = Objects.requireNonNull(connectorFactory, "connectorFactory must not be null");
         this.metadataStore = Objects.requireNonNull(metadataStore, "metadataStore must not be null");
+        this.sharedContainer = new SharedPostgresContainer(
+                Objects.requireNonNull(commandRunner, "commandRunner must not be null"), config, this.connectorFactory);
     }
 
     public BranchMetadataStore metadataStore() {
@@ -74,8 +75,7 @@ public final class BranchFork {
             throw fail("Branch already exists: " + currentBranch, null);
         }
 
-        ensureSharedContainer();
-        waitUntilReady();
+        sharedContainer.ensureRunning();
 
         String database = defaultDatabaseName(currentBranch);
         out("Creating database '" + database + "' for branch '" + currentBranch + "'.");
@@ -97,47 +97,6 @@ public final class BranchFork {
         }
     }
 
-    private void ensureSharedContainer() {
-        CommandResult inspect = run(List.of("docker", "inspect", "--format", "{{.State.Running}}", config.containerName()),
-                "inspect shared PostgreSQL container", false);
-        if (inspect.succeeded() && inspect.output().equals("true")) {
-            out("Reusing shared PostgreSQL container '" + config.containerName() + "'.");
-            return;
-        }
-
-        out("Starting shared PostgreSQL container '" + config.containerName() + "'.");
-        runChecked("start shared PostgreSQL container", List.of(
-                "docker", "run", "--detach", "--name", config.containerName(),
-                "--publish", config.hostPort() + ":" + CONTAINER_PORT,
-                "--env", "POSTGRES_USER=" + config.user(),
-                "--env", "POSTGRES_PASSWORD=" + config.password(),
-                "--env", "POSTGRES_DB=" + config.adminDatabase(),
-                config.image()
-        ));
-    }
-
-    private void waitUntilReady() {
-        out("Waiting for shared PostgreSQL container '" + config.containerName() + "' to accept connections on port " + config.hostPort() + ".");
-        for (int attempt = 1; attempt <= READY_ATTEMPTS; attempt++) {
-            if (canConnect()) {
-                out("Shared PostgreSQL container '" + config.containerName() + "' is ready.");
-                return;
-            }
-            if (attempt < READY_ATTEMPTS) {
-                sleepBeforeRetry();
-            }
-        }
-        throw fail("Shared PostgreSQL container did not become ready after " + READY_ATTEMPTS + " attempts.", null);
-    }
-
-    private boolean canConnect() {
-        try (SqlConnector connector = connect(config.adminDatabase())) {
-            return true;
-        } catch (SQLException exception) {
-            return false;
-        }
-    }
-
     private void executeSql(String operation, String database, String sql) {
         try (SqlConnector connector = connect(database)) {
             connector.execute(sql);
@@ -156,37 +115,6 @@ public final class BranchFork {
         ConnectionSettings adminSettings = metadataConfig.connectionTo(metadataConfig.adminDatabase());
         ConnectionSettings settings = metadataConfig.connectionTo(metadataConfig.database());
         return new PostgresBranchMetadataStore(factory, adminSettings, settings);
-    }
-
-    private void runChecked(String operation, List<String> command) {
-        CommandResult result = run(command, operation, true);
-        if (!result.succeeded()) {
-            throw fail("Could not " + operation + ". Docker exited with code " + result.exitCode() + ".", null);
-        }
-    }
-
-    private CommandResult run(List<String> command, String operation, boolean printFailure) {
-        try {
-            CommandResult result = commandRunner.run(command);
-            if (printFailure && !result.succeeded()) {
-                err("Failed to " + operation + " (exit " + result.exitCode() + "): " + result.output());
-            }
-            return result;
-        } catch (IOException exception) {
-            throw fail("Could not " + operation + ": " + exception.getMessage(), exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw fail("Interrupted while attempting to " + operation + ".", exception);
-        }
-    }
-
-    private void sleepBeforeRetry() {
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw fail("Interrupted while waiting for PostgreSQL to start.", exception);
-        }
     }
 
     private static void validateBranch(String branch, String argumentName) {
