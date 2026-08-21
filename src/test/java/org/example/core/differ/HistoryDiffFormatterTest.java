@@ -15,7 +15,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void identicalHistoriesProduceNoLines() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY);");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
 
         List<String> lines = formatter.format("left", "right", List.of(create), List.of(create));
 
@@ -24,7 +24,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void aColumnChangedOnlyOnOneSideIsNotLabeledAsAConflict() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY);");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
         ChangeSet addColumn = changeset("ALTER TABLE orders ADD COLUMN total INT;");
 
         List<String> lines = formatter.format("main", "feature/orders", List.of(create, addColumn), List.of(create));
@@ -40,7 +40,7 @@ class HistoryDiffFormatterTest {
     @Test
     void bothSidesAddingDifferentColumnsToTheSameTableIsNotAConflictAccordingToDatabaseDiff() {
         // Same table, but no shared object actually disagrees - each column gets its own node, neither labeled.
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY);");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
         ChangeSet leftAdd = changeset("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
         ChangeSet rightAdd = changeset("ALTER TABLE orders ADD COLUMN note TEXT;");
 
@@ -58,7 +58,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void aConflictingColumnIsLabeledAndListsBothSidesStatementsUnderneathIt() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
         ChangeSet leftAlter = changeset("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
         ChangeSet rightAlter = changeset("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
 
@@ -75,7 +75,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void renamingAColumnOnOneSideWhileTheOtherModifiesItIsAConflictByStableIdEvenThoughTheNamesDiffer() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));");
         ChangeSet rename = changeset("ALTER TABLE orders RENAME COLUMN col1 TO col2;");
         ChangeSet retype = changeset("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;");
 
@@ -92,7 +92,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void multipleStatementsAgainstTheSameConflictingColumnOnOneSideAreAllListed() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
         ChangeSet leftAlter1 = changeset("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
         ChangeSet leftAlter2 = changeset("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
         ChangeSet rightAlter = changeset("ALTER TABLE orders ALTER COLUMN total TYPE NUMERIC(12,4);");
@@ -112,7 +112,7 @@ class HistoryDiffFormatterTest {
 
     @Test
     void changesBeforeTheCommonAncestorAreExcludedFromTheOutput() {
-        ChangeSet create = changeset("CREATE TABLE orders (id INT PRIMARY KEY);");
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
         ChangeSet divergentLeft = changeset("ALTER TABLE orders ADD COLUMN total INT;");
 
         List<String> lines = formatter.format("left", "right", List.of(create, divergentLeft), List.of(create));
@@ -123,5 +123,52 @@ class HistoryDiffFormatterTest {
 
     private ChangeSet changeset(String ddl) {
         return new ChangeSet(idSequence++, "test", ddl, ChangesetStatus.COMMIT, Instant.now());
+    }
+
+    @Test
+    void aConstraintAddedOnOneSideGetsItsOwnNodeLabeledWithItsKind() {
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
+        ChangeSet addKey = changeset("ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);");
+
+        List<String> lines = formatter.format("main", "feature", List.of(create, addKey), List.of(create));
+
+        assertEquals(List.of(
+                "main vs feature",
+                "- orders",
+                "  |- orders_pkey (PRIMARY KEY)",
+                "    |- > ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);"
+        ), lines);
+    }
+
+    @Test
+    void anIndexAddedOnOneSideGetsItsOwnNodeToo() {
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL, total INT);");
+        ChangeSet addIndex = changeset("CREATE UNIQUE INDEX idx_orders_total ON orders (total);");
+
+        List<String> lines = formatter.format("main", "feature", List.of(create, addIndex), List.of(create));
+
+        assertEquals(List.of(
+                "main vs feature",
+                "- orders",
+                "  |- idx_orders_total (UNIQUE INDEX)",
+                "    |- > CREATE UNIQUE INDEX idx_orders_total ON orders (total);"
+        ), lines);
+    }
+
+    @Test
+    void thesameConstraintNameDefinedDifferentlyOnEachSideIsLabeledConflicting() {
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL, email TEXT);");
+        ChangeSet leftKey = changeset("ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (id);");
+        ChangeSet rightKey = changeset("ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (email);");
+
+        List<String> lines = formatter.format("left", "right", List.of(create, leftKey), List.of(create, rightKey));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- orders",
+                "  |- orders_key (UNIQUE) (conflicting)",
+                "    |- > ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (id);",
+                "    |- < ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (email);"
+        ), lines);
     }
 }

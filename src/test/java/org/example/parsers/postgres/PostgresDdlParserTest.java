@@ -2,7 +2,10 @@ package org.example.parsers.postgres;
 
 import org.example.core.replayer.SchemaOperation;
 import org.example.models.schema.ColumnModel;
+import org.example.models.schema.ConstraintType;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,7 +20,7 @@ class PostgresDdlParserTest {
     void parsesCreateTableIntoAllItsColumnModels() {
         String ddl = """
                 CREATE TABLE orders (
-                    id INT PRIMARY KEY,
+                    id INT NOT NULL,
                     total NUMERIC(10,2) NOT NULL DEFAULT 0,
                     note TEXT
                 )""";
@@ -46,18 +49,19 @@ class PostgresDdlParserTest {
     @Test
     void parsesCreateTableIfNotExistsAndSchemaQualifiedNames() {
         SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
-                "CREATE TABLE IF NOT EXISTS public.orders (id INT PRIMARY KEY)");
+                "CREATE TABLE IF NOT EXISTS public.orders (id INT NOT NULL)");
 
         assertEquals("orders", operation.tableName());
         assertTrue(operation.ifNotExists());
     }
 
     @Test
-    void ignoresTableLevelConstraintsWhenParsingColumns() {
-        SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
-                "CREATE TABLE orders (id INT, name TEXT, PRIMARY KEY(id), CONSTRAINT uq UNIQUE(name))");
+    void rejectsTableLevelConstraintsInCreateTable() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> parser.parse(
+                "CREATE TABLE orders (id INT, name TEXT, PRIMARY KEY(id), CONSTRAINT uq UNIQUE(name))"));
 
-        assertEquals(2, operation.columns().size());
+        assertTrue(exception.getMessage().contains("CREATE TABLE defines columns only"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("Add it separately"), exception.getMessage());
     }
 
     @Test
@@ -137,5 +141,117 @@ class PostgresDdlParserTest {
     @Test
     void rejectsUnparseableStatements() {
         assertThrows(IllegalArgumentException.class, () -> parser.parse("not even sql"));
+    }
+
+    @Test
+    void rejectsAConstraintDeclaredOnAColumn() {
+        IllegalArgumentException primaryKey = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("CREATE TABLE orders (id INT PRIMARY KEY)"));
+        assertTrue(primaryKey.getMessage().contains("declares PRIMARY KEY"), primaryKey.getMessage());
+        assertTrue(primaryKey.getMessage().contains("ADD CONSTRAINT orders_pkey PRIMARY KEY (id)"), primaryKey.getMessage());
+
+        IllegalArgumentException unique = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("CREATE TABLE orders (email TEXT UNIQUE)"));
+        assertTrue(unique.getMessage().contains("declares UNIQUE"), unique.getMessage());
+
+        IllegalArgumentException references = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("CREATE TABLE orders (customer_id INT REFERENCES customers(id))"));
+        assertTrue(references.getMessage().contains("FOREIGN KEY"), references.getMessage());
+    }
+
+    @Test
+    void stillAcceptsNotNullAndDefaultOnAColumnBecauseTheyBelongToTheColumn() {
+        SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
+                "CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2) DEFAULT 0, note TEXT NULL)");
+
+        assertFalse(operation.columns().get(0).nullable());
+        assertEquals("0", operation.columns().get(1).defaultValue());
+        assertTrue(operation.columns().get(2).nullable());
+    }
+
+    @Test
+    void parsesAddPrimaryKeyAndUniqueConstraints() {
+        SchemaOperation.AddConstraint primaryKey = (SchemaOperation.AddConstraint) parser.parse(
+                "ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id)");
+        assertEquals("orders", primaryKey.tableName());
+        assertEquals("orders_pkey", primaryKey.constraintName());
+        assertEquals(ConstraintType.PRIMARY_KEY, primaryKey.type());
+        assertEquals(List.of("id"), primaryKey.columnNames());
+        assertNull(primaryKey.referencedTableName());
+
+        SchemaOperation.AddConstraint unique = (SchemaOperation.AddConstraint) parser.parse(
+                "ALTER TABLE orders ADD CONSTRAINT orders_email_key UNIQUE (email, region)");
+        assertEquals(ConstraintType.UNIQUE, unique.type());
+        assertEquals(List.of("email", "region"), unique.columnNames());
+    }
+
+    @Test
+    void parsesAForeignKeyIncludingWhatItReferences() {
+        SchemaOperation.AddConstraint foreignKey = (SchemaOperation.AddConstraint) parser.parse(
+                "ALTER TABLE orders ADD CONSTRAINT orders_customer_fkey FOREIGN KEY (customer_id)"
+                        + " REFERENCES customers (id)");
+
+        assertEquals(ConstraintType.FOREIGN_KEY, foreignKey.type());
+        assertEquals(List.of("customer_id"), foreignKey.columnNames());
+        assertEquals("customers", foreignKey.referencedTableName());
+        assertEquals(List.of("id"), foreignKey.referencedColumnNames());
+    }
+
+    @Test
+    void parsesDropConstraintRatherThanReadingItAsADroppedColumn() {
+        SchemaOperation.DropConstraint operation = (SchemaOperation.DropConstraint) parser.parse(
+                "ALTER TABLE orders DROP CONSTRAINT orders_pkey");
+
+        assertEquals("orders", operation.tableName());
+        assertEquals("orders_pkey", operation.constraintName());
+    }
+
+    @Test
+    void parsesPlainAndUniqueIndexes() {
+        SchemaOperation.CreateIndex plain = (SchemaOperation.CreateIndex) parser.parse(
+                "CREATE INDEX idx_orders_total ON orders (total)");
+        assertEquals("orders", plain.tableName());
+        assertEquals("idx_orders_total", plain.indexName());
+        assertFalse(plain.unique());
+        assertEquals(List.of("total"), plain.columnNames());
+
+        SchemaOperation.CreateIndex unique = (SchemaOperation.CreateIndex) parser.parse(
+                "CREATE UNIQUE INDEX idx_orders_email ON orders (email, region)");
+        assertTrue(unique.unique());
+        assertEquals(List.of("email", "region"), unique.columnNames());
+    }
+
+    @Test
+    void rejectsConstraintKindsTheModelCannotHold() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("ALTER TABLE orders ADD CONSTRAINT positive CHECK (id > 0)"));
+
+        assertTrue(exception.getMessage().contains("Unsupported constraint type"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("PRIMARY KEY, UNIQUE and FOREIGN KEY"), exception.getMessage());
+    }
+
+    /**
+     * A constraint's name is its identity across branches, so the unnamed forms Postgres would auto-name are not
+     * accepted. They reach the parser with nothing identifying them at all, so the message points at the
+     * {@code ADD CONSTRAINT} form rather than at a name.
+     */
+    @Test
+    void rejectsUnnamedConstraintForms() {
+        for (String ddl : List.of("ALTER TABLE orders ADD PRIMARY KEY (id)",
+                "ALTER TABLE orders ADD UNIQUE (email)",
+                "ALTER TABLE orders ADD FOREIGN KEY (customer_id) REFERENCES customers (id)")) {
+            IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                    () -> parser.parse(ddl), ddl);
+            assertTrue(exception.getMessage().contains("ALTER TABLE ADD CONSTRAINT"), exception.getMessage());
+        }
+    }
+
+    @Test
+    void rejectsDropIndexExplainingWhyItCannotBeAttributedToATable() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("DROP INDEX idx_orders_total"));
+
+        assertTrue(exception.getMessage().contains("DROP INDEX is not supported"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("names no table"), exception.getMessage());
     }
 }

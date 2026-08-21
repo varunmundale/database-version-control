@@ -64,16 +64,26 @@ public final class Merger {
         return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());
     }
 
-    /** Every column {@link DatabaseDiff} finds genuinely conflicting (matched by stable id) between the two branches' fully replayed schemas. */
+    /**
+     * Everything {@link DatabaseDiff} finds genuinely conflicting (matched by stable id) between the two branches'
+     * fully replayed schemas: a column, constraint or index both branches changed in incompatible ways.
+     */
     private List<String> conflicts(List<ChangeSet> currentHistory, List<ChangeSet> otherHistory) {
         Map<String, TableModel> currentSchema = replayer.replay(currentHistory);
         Map<String, TableModel> otherSchema = replayer.replay(otherHistory);
 
         List<String> lines = new ArrayList<>();
         for (TableDiff tableDiff : databaseDiff.diff(currentSchema.values(), otherSchema.values())) {
+            String table = "table '" + tableDiff.tableName() + "', ";
             tableDiff.columnDiffs().stream()
                     .filter(columnDiff -> columnDiff.side() == Side.CONFLICT)
-                    .forEach(columnDiff -> lines.add("table '" + tableDiff.tableName() + "', column '" + columnDiff.columnName() + "'"));
+                    .forEach(columnDiff -> lines.add(table + "column '" + columnDiff.columnName() + "'"));
+            tableDiff.constraintDiffs().stream()
+                    .filter(constraintDiff -> constraintDiff.side() == Side.CONFLICT)
+                    .forEach(constraintDiff -> lines.add(table + "constraint '" + constraintDiff.constraintName() + "'"));
+            tableDiff.indexDiffs().stream()
+                    .filter(indexDiff -> indexDiff.side() == Side.CONFLICT)
+                    .forEach(indexDiff -> lines.add(table + "index '" + indexDiff.indexName() + "'"));
         }
         return lines;
     }

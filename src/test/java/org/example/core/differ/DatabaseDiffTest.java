@@ -22,7 +22,7 @@ class DatabaseDiffTest {
 
     @Test
     void identicalSchemasHaveNoDifferences() {
-        TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(orders), List.of(orders));
 
@@ -31,7 +31,7 @@ class DatabaseDiffTest {
 
     @Test
     void tableOnlyOnLeftReportsTheTableAndEachColumnAsLeft() {
-        TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(orders), List.of());
 
@@ -47,7 +47,7 @@ class DatabaseDiffTest {
 
     @Test
     void tableOnlyOnRightReportsTheTableAndEachColumnAsRight() {
-        TableModel orders = table("CREATE TABLE orders (id INT PRIMARY KEY);");
+        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL);");
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(), List.of(orders));
 
@@ -58,8 +58,8 @@ class DatabaseDiffTest {
 
     @Test
     void aColumnChangedOnBothSidesIsAConflictButTheUnchangedTableIsNot() {
-        TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);",
+        TableModel left = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
+        TableModel right = table("CREATE TABLE orders (id INT NOT NULL);",
                 "ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
         // right's 'total' has a different type than left's - same stable id, different definition.
 
@@ -78,8 +78,8 @@ class DatabaseDiffTest {
 
     @Test
     void anAddedColumnOnOneSideIsNotAConflictAndDoesNotFlagTheTable() {
-        TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);");
+        TableModel left = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
+        TableModel right = table("CREATE TABLE orders (id INT NOT NULL);");
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(left), List.of(right));
 
@@ -90,7 +90,7 @@ class DatabaseDiffTest {
 
     @Test
     void renamingAColumnOnOneSideWhileTheOtherSideModifiesItIsAConflictNotAnUnrelatedAppearanceAndDisappearance() {
-        String createOrders = "CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));";
+        String createOrders = "CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));";
         Map<String, TableModel> renamedSide = replayer.replay(List.of(
                 changeset(createOrders), changeset("ALTER TABLE orders RENAME COLUMN col1 TO col2;")));
         Map<String, TableModel> modifiedSide = replayer.replay(List.of(
@@ -109,8 +109,8 @@ class DatabaseDiffTest {
 
     @Test
     void columnDiffsWithinATableAreOrderedByColumnName() {
-        TableModel left = table("CREATE TABLE orders (id INT PRIMARY KEY, zeta TEXT, alpha TEXT, mid TEXT);");
-        TableModel right = table("CREATE TABLE orders (id INT PRIMARY KEY);");
+        TableModel left = table("CREATE TABLE orders (id INT NOT NULL, zeta TEXT, alpha TEXT, mid TEXT);");
+        TableModel right = table("CREATE TABLE orders (id INT NOT NULL);");
         // zeta, alpha and mid are each LEFT-only diffs; output should read alpha, mid, zeta - not creation order.
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(left), List.of(right));
@@ -121,10 +121,10 @@ class DatabaseDiffTest {
 
     @Test
     void eachTableIsDiffedIndependentlyAndResultsAreOrderedByTableName() {
-        TableModel zebras = table("CREATE TABLE zebras (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        TableModel accounts = table("CREATE TABLE accounts (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        TableModel zebrasChanged = table("CREATE TABLE zebras (id INT PRIMARY KEY);", "ALTER TABLE zebras ADD COLUMN total INT NOT NULL;");
-        TableModel accountsChanged = table("CREATE TABLE accounts (id INT PRIMARY KEY);", "ALTER TABLE accounts ADD COLUMN total INT NOT NULL;");
+        TableModel zebras = table("CREATE TABLE zebras (id INT NOT NULL, total NUMERIC(10,2));");
+        TableModel accounts = table("CREATE TABLE accounts (id INT NOT NULL, total NUMERIC(10,2));");
+        TableModel zebrasChanged = table("CREATE TABLE zebras (id INT NOT NULL);", "ALTER TABLE zebras ADD COLUMN total INT NOT NULL;");
+        TableModel accountsChanged = table("CREATE TABLE accounts (id INT NOT NULL);", "ALTER TABLE accounts ADD COLUMN total INT NOT NULL;");
 
         List<TableDiff> tableDiffs = databaseDiff.diff(List.of(zebras, accounts), List.of(zebrasChanged, accountsChanged));
 

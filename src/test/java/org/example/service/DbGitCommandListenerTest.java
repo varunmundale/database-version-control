@@ -92,7 +92,7 @@ class DbGitCommandListenerTest {
 
     @Test
     void appliesAMultilineDdlStatementAndRecordsAChangesetOverTheSocket() throws IOException {
-        Response response = sendAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);");
+        Response response = sendAdd("CREATE TABLE orders (\n  id INT NOT NULL\n);");
 
         assertEquals("OK", response.status);
         assertEquals(List.of("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)."), response.body);

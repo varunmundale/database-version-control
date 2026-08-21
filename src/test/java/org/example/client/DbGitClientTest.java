@@ -113,7 +113,7 @@ class DbGitClientTest {
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
 
-        int exitCode = client.runAdd("CREATE TABLE orders (\n  id INT PRIMARY KEY\n);", printStream(outBytes), printStream(errBytes));
+        int exitCode = client.runAdd("CREATE TABLE orders (\n  id INT NOT NULL\n);", printStream(outBytes), printStream(errBytes));
 
         assertEquals(0, exitCode);
         assertEquals("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)." + System.lineSeparator(),

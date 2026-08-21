@@ -1,7 +1,6 @@
 package org.example.core.differ;
 
 import org.example.core.replayer.Replayer;
-import org.example.models.schema.ColumnModel;
 import org.example.models.schema.StableId;
 import org.example.models.schema.TableModel;
 import org.example.models.versioning.ChangeSet;
@@ -16,8 +15,8 @@ import java.util.TreeSet;
 /**
  * Renders the divergence between two branches' commit histories as a tree: finds the lowest common ancestor
  * commit (the longest shared prefix of both histories), then - for every table touched beyond it - a node per
- * column that actually differs, each listing every statement run against it on that side, marked {@code >} for
- * the left branch or {@code <} for the right. A column {@link DatabaseDiff} finds genuinely conflicting (matched
+ * column, constraint and index that actually differs, each listing every statement run against it on that side,
+ * marked {@code >} for the left branch or {@code <} for the right. A column {@link DatabaseDiff} finds genuinely conflicting (matched
  * by stable id, so a rename on one side racing a modification on the other still counts) is labeled as such, with
  * both sides' statements nested underneath it - "bringing them together" without needing a separate rendering
  * for conflicting vs. non-conflicting columns.
@@ -54,8 +53,8 @@ public final class HistoryDiffFormatter {
             return List.of();
         }
 
-        Map<StableId, List<ChangeSet>> leftByColumn = changesetsByColumn(leftHistory, commonAncestorLength);
-        Map<StableId, List<ChangeSet>> rightByColumn = changesetsByColumn(rightHistory, commonAncestorLength);
+        Map<StableId, List<ChangeSet>> leftByObject = changesetsByObject(leftHistory, commonAncestorLength);
+        Map<StableId, List<ChangeSet>> rightByObject = changesetsByObject(rightHistory, commonAncestorLength);
         Map<String, TableDiff> tableDiffsByName = tableDiffsByName(leftHistory, rightHistory);
 
         TreeSet<String> touchedTables = new TreeSet<>();
@@ -65,7 +64,7 @@ public final class HistoryDiffFormatter {
         List<String> lines = new ArrayList<>();
         lines.add(left + " vs " + right);
         for (String table : touchedTables) {
-            appendTable(lines, table, tableDiffsByName.get(table), leftByColumn, rightByColumn);
+            appendTable(lines, table, tableDiffsByName.get(table), leftByObject, rightByObject);
         }
         return lines;
     }
@@ -79,27 +78,47 @@ public final class HistoryDiffFormatter {
     }
 
     private void appendTable(List<String> lines, String table, TableDiff tableDiff,
-                              Map<StableId, List<ChangeSet>> leftByColumn, Map<StableId, List<ChangeSet>> rightByColumn) {
+                              Map<StableId, List<ChangeSet>> leftByObject, Map<StableId, List<ChangeSet>> rightByObject) {
         lines.add("- " + table);
         if (tableDiff == null) {
             return;
         }
         for (ColumnDiff columnDiff : tableDiff.columnDiffs()) {
-            String label = columnDiff.columnName() + (columnDiff.side() == Side.CONFLICT ? " (conflicting)" : "");
-            lines.add("  |- " + label);
-            statementsFor(columnDiff.left(), leftByColumn).forEach(changeset -> lines.add("    |- > " + changeset.ddl()));
-            statementsFor(columnDiff.right(), rightByColumn).forEach(changeset -> lines.add("    |- < " + changeset.ddl()));
+            appendNode(lines, columnDiff.columnName(), columnDiff.side(), columnDiff.id(), leftByObject, rightByObject);
+        }
+        for (ConstraintDiff constraintDiff : tableDiff.constraintDiffs()) {
+            appendNode(lines, constraintDiff.constraintName() + " (" + kindOf(constraintDiff) + ")",
+                    constraintDiff.side(), constraintDiff.id(), leftByObject, rightByObject);
+        }
+        for (IndexDiff indexDiff : tableDiff.indexDiffs()) {
+            appendNode(lines, indexDiff.indexName() + " (" + kindOf(indexDiff) + ")",
+                    indexDiff.side(), indexDiff.id(), leftByObject, rightByObject);
         }
     }
 
-    private static List<ChangeSet> statementsFor(ColumnModel column, Map<StableId, List<ChangeSet>> byColumn) {
-        return column == null ? List.of() : byColumn.getOrDefault(column.id(), List.of());
+    /**
+     * One node of the tree, with every statement each side ran against that object nested underneath it. Columns,
+     * constraints and indexes all key off a stable id, so one lookup serves all three.
+     */
+    private static void appendNode(List<String> lines, String label, Side side, StableId id,
+                                    Map<StableId, List<ChangeSet>> leftByObject, Map<StableId, List<ChangeSet>> rightByObject) {
+        lines.add("  |- " + label + (side == Side.CONFLICT ? " (conflicting)" : ""));
+        leftByObject.getOrDefault(id, List.of()).forEach(changeset -> lines.add("    |- > " + changeset.ddl()));
+        rightByObject.getOrDefault(id, List.of()).forEach(changeset -> lines.add("    |- < " + changeset.ddl()));
     }
 
-    /** Every changeset from {@code divergeFrom} onward, keyed by the column id it created or changed. */
-    private Map<StableId, List<ChangeSet>> changesetsByColumn(List<ChangeSet> history, int divergeFrom) {
+    private static String kindOf(ConstraintDiff constraintDiff) {
+        return constraintDiff.left() != null ? constraintDiff.left().definition() : constraintDiff.right().definition();
+    }
+
+    private static String kindOf(IndexDiff indexDiff) {
+        return indexDiff.left() != null ? indexDiff.left().definition() : indexDiff.right().definition();
+    }
+
+    /** Every changeset from {@code divergeFrom} onward, keyed by the id of each object it created or changed. */
+    private Map<StableId, List<ChangeSet>> changesetsByObject(List<ChangeSet> history, int divergeFrom) {
         Map<String, TableModel> tables = new LinkedHashMap<>();
-        Map<StableId, List<ChangeSet>> byColumn = new LinkedHashMap<>();
+        Map<StableId, List<ChangeSet>> byObject = new LinkedHashMap<>();
         for (int i = 0; i < history.size(); i++) {
             ChangeSet changeset = history.get(i);
             String table = tableName(changeset);
@@ -107,24 +126,26 @@ public final class HistoryDiffFormatter {
             TableModel after = replayer.apply(SCHEMA, changeset.ddl(), before);
             tables.put(table, after);
             if (i >= divergeFrom) {
-                recordTouchedColumns(before, after, changeset, byColumn);
+                recordTouched(before, after, changeset, byObject);
             }
         }
-        return byColumn;
+        return byObject;
     }
 
-    private static void recordTouchedColumns(TableModel before, TableModel after, ChangeSet changeset,
-                                              Map<StableId, List<ChangeSet>> byColumn) {
-        Map<StableId, ColumnModel> beforeColumns = new LinkedHashMap<>();
-        if (before != null) {
-            before.columns().forEach(column -> beforeColumns.put(column.id(), column));
-        }
-        for (ColumnModel column : after.columns()) {
-            ColumnModel previous = beforeColumns.get(column.id());
-            if (previous == null || previous.differsFrom(column)) {
-                byColumn.computeIfAbsent(column.id(), unused -> new ArrayList<>()).add(changeset);
-            }
-        }
+    /**
+     * What one statement touched is the same question {@link TableDiff#between} already answers - so ask it, with
+     * the table as it stood before the statement on one side and after it on the other.
+     */
+    private static void recordTouched(TableModel before, TableModel after, ChangeSet changeset,
+                                       Map<StableId, List<ChangeSet>> byObject) {
+        TableDiff delta = TableDiff.between(after.name(), before, after);
+        delta.columnDiffs().forEach(columnDiff -> record(byObject, columnDiff.id(), changeset));
+        delta.constraintDiffs().forEach(constraintDiff -> record(byObject, constraintDiff.id(), changeset));
+        delta.indexDiffs().forEach(indexDiff -> record(byObject, indexDiff.id(), changeset));
+    }
+
+    private static void record(Map<StableId, List<ChangeSet>> byObject, StableId id, ChangeSet changeset) {
+        byObject.computeIfAbsent(id, unused -> new ArrayList<>()).add(changeset);
     }
 
     private String tableName(ChangeSet changeset) {

@@ -21,7 +21,7 @@ class ReplayerTest {
     @Test
     void renamingAColumnPreservesItsStableIdUnderTheNewName() {
         List<ChangeSet> history = List.of(
-                changeset("CREATE TABLE orders (id INT PRIMARY KEY, note TEXT);"),
+                changeset("CREATE TABLE orders (id INT NOT NULL, note TEXT);"),
                 changeset("ALTER TABLE orders RENAME COLUMN note TO memo;"));
 
         Map<String, TableModel> before = replayer.replay(List.of(history.get(0)));
@@ -36,7 +36,7 @@ class ReplayerTest {
     @Test
     void aColumnDroppedAndADifferentlyNamedColumnAddedAreNotTreatedAsARename() {
         List<ChangeSet> history = List.of(
-                changeset("CREATE TABLE orders (id INT PRIMARY KEY, note TEXT);"),
+                changeset("CREATE TABLE orders (id INT NOT NULL, note TEXT);"),
                 changeset("ALTER TABLE orders DROP COLUMN note;"),
                 changeset("ALTER TABLE orders ADD COLUMN memo TEXT;"));
 
@@ -51,7 +51,7 @@ class ReplayerTest {
     @Test
     void alterColumnTypeKeepsTheSameNameAndStableId() {
         List<ChangeSet> history = List.of(
-                changeset("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));"),
+                changeset("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));"),
                 changeset("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;"));
 
         Map<String, TableModel> before = replayer.replay(List.of(history.get(0)));
@@ -65,7 +65,7 @@ class ReplayerTest {
 
     @Test
     void renameOnOneBranchAndModificationOnTheOtherShareTheSameStableIdAfterDivergence() {
-        String createOrders = "CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));";
+        String createOrders = "CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));";
 
         Map<String, TableModel> renamedSide = replayer.replay(List.of(
                 changeset(createOrders), changeset("ALTER TABLE orders RENAME COLUMN col1 TO col2;")));

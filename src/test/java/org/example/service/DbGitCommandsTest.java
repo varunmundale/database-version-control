@@ -92,7 +92,7 @@ class DbGitCommandsTest {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
-        String ddl = "CREATE TABLE orders (\n  id INT PRIMARY KEY,\n  name TEXT\n);";
+        String ddl = "CREATE TABLE orders (\n  id INT NOT NULL,\n  name TEXT\n);";
 
         DbGitCommandResult result = dbgit.add(ddl);
 
@@ -110,7 +110,7 @@ class DbGitCommandsTest {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;";
 
         DbGitCommandResult result = dbgit.add(alter);
@@ -136,7 +136,7 @@ class DbGitCommandsTest {
     void commitsAllAppliedChangesetsIntoOneCommitWithForwardAndBackwardPointers() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
 
         DbGitCommandResult result = dbgit.execute("dbgit commit");
@@ -145,7 +145,7 @@ class DbGitCommandsTest {
         assertTrue(metadataStore.changesetsForBranch("main").stream().allMatch(changeset -> changeset.status() == ChangesetStatus.COMMIT));
         List<ChangeSet> history = metadataStore.commitHistory("main");
         assertEquals(2, history.size());
-        assertEquals("CREATE TABLE orders (id INT PRIMARY KEY);", history.get(0).ddl());
+        assertEquals("CREATE TABLE orders (id INT NOT NULL);", history.get(0).ddl());
         assertEquals("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;", history.get(1).ddl());
     }
 
@@ -162,7 +162,7 @@ class DbGitCommandsTest {
     void onlyAppliedChangesetsAreEverCommittedTwice() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
 
         DbGitCommandResult result = dbgit.execute("dbgit commit");
@@ -175,7 +175,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
 
@@ -189,7 +189,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
         dbgit.add("ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
@@ -217,7 +217,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
         dbgit.add("ALTER TABLE orders RENAME COLUMN col1 TO col2;");
@@ -251,7 +251,7 @@ class DbGitCommandsTest {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
         DbGitCommandListener dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
         String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);";
@@ -269,7 +269,7 @@ class DbGitCommandsTest {
 
         List<ChangeSet> mainHistory = metadataStore.commitHistory("main");
         assertEquals(2, mainHistory.size());
-        assertEquals("CREATE TABLE orders (id INT PRIMARY KEY);", mainHistory.get(0).ddl());
+        assertEquals("CREATE TABLE orders (id INT NOT NULL);", mainHistory.get(0).ddl());
         assertEquals(alter, mainHistory.get(1).ddl());
 
         // The alter ran once when originally staged on feature/orders, then again for real against both the
@@ -292,7 +292,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
         dbgit.add("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
@@ -317,7 +317,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
         dbgit.execute("dbgit checkout main");
@@ -353,7 +353,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
 
         dbgit.execute("dbgit checkout -b feature/orders");
