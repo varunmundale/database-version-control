@@ -18,8 +18,6 @@ import java.util.regex.Pattern;
 /** Forks a branch's database into one persistent PostgreSQL Docker container, recreating it from the parent's commit history. */
 public final class Forker {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
-    private static final String POSTGRES_LOGICAL_NAME = "postgres";
-    private static final String DEFAULT_BRANCH = "main";
 
     private final BranchDatabaseConfig config;
     private final BranchDatabaseRepository branchDatabases;
@@ -52,14 +50,6 @@ public final class Forker {
         return branchDatabases;
     }
 
-    /** The database a branch's own DDL is applied against: the shared admin database for {@code main}, its forked copy otherwise. */
-    public String defaultDatabaseName(String branch) {
-        if (branch.equals(DEFAULT_BRANCH)) {
-            return config.adminDatabase();
-        }
-        return sanitizeBranchName(branch) + "_" + POSTGRES_LOGICAL_NAME;
-    }
-
     public ForkResult fork(String fromBranch, String currentBranch) {
         validateBranch(fromBranch, "fromBranch");
         validateBranch(currentBranch, "currentBranch");
@@ -70,7 +60,7 @@ public final class Forker {
 
         sharedContainer.ensureRunning();
 
-        String database = defaultDatabaseName(currentBranch);
+        String database = BranchConnections.forkedDatabaseName(currentBranch);
         List<ChangeSet> history = versioningService.commitHistory(currentBranch);
         try {
             out("Creating database '" + database + "' for branch '" + currentBranch + "'.");
@@ -90,11 +80,6 @@ public final class Forker {
         if (branch == null || !BRANCH_NAME.matcher(branch).matches()) {
             throw new IllegalArgumentException(argumentName + " must be a non-empty Git-style branch name");
         }
-    }
-
-    private static String sanitizeBranchName(String branch) {
-        String readableBranch = branch.replaceAll("[^a-zA-Z0-9_.-]", "_").toLowerCase();
-        return readableBranch.length() > 40 ? readableBranch.substring(0, 40) : readableBranch;
     }
 
     private static ForkException fail(String message, Throwable cause) {

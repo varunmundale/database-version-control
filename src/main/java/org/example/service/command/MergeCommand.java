@@ -18,7 +18,7 @@ public final class MergeCommand extends Command {
 
     public MergeCommand(CommandContext context, String otherBranch) {
         super(context);
-        this.merger = new Merger(context.forker(), context.replayer());
+        this.merger = new Merger(context.forker(), context.replayer(), context.connections());
         this.otherBranch = Objects.requireNonNull(otherBranch, "otherBranch must not be null");
     }
 

@@ -15,6 +15,9 @@ public final class CommandFactory {
     }
 
     public Command create(List<String> arguments) {
+        if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("init")) {
+            return new InitCommand(context, arguments.subList(2, arguments.size()));
+        }
         if (arguments.equals(List.of("dbgit", "branch"))) {
             return new BranchCommand(context);
         }
@@ -31,7 +34,8 @@ public final class CommandFactory {
             return new MergeCommand(context, arguments.get(2));
         }
         throw new IllegalArgumentException(
-                "Usage: dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add | dbgit commit "
-                        + "| dbgit diff <branch1> <branch2> | dbgit merge <branch>");
+                "Usage: dbgit init --host <h> [--port 5432] --database <d> --user <u> [--password <w>] "
+                        + "| dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add "
+                        + "| dbgit commit | dbgit diff <branch1> <branch2> | dbgit merge <branch>");
     }
 }

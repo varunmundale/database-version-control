@@ -7,6 +7,7 @@ import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
+import org.example.models.tracking.TrackedDatabase;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -118,12 +120,11 @@ class ForkerTest {
         assertTrue(runner.commands.isEmpty());
     }
 
+    /** main is not a fork - it tracks a real database - so only the other branches get a scratchpad name. */
     @Test
-    void defaultDatabaseNameIsTheAdminDatabaseForMainAndAForkedCopyForOtherBranches() {
-        Forker forker = new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new FakeMetadataStore());
-
-        assertEquals("postgres", forker.defaultDatabaseName("main"));
-        assertEquals("feature_orders_postgres", forker.defaultDatabaseName("feature/orders"));
+    void forkedBranchesGetASanitizedScratchpadDatabaseName() {
+        assertEquals("feature_orders_postgres", BranchConnections.forkedDatabaseName("feature/orders"));
+        assertThrows(IllegalArgumentException.class, () -> BranchConnections.forkedDatabaseName("main"));
     }
 
     private static final class RecordingRunner implements CommandRunner {
@@ -143,6 +144,20 @@ class ForkerTest {
 
     /** A branch is just a name pointing at a commit; forking copies that pointer rather than creating new commits. */
     private static final class FakeMetadataStore implements VersioningService {
+        private final Map<String, TrackedDatabase> trackedByBranch = new HashMap<>();
+
+        @Override
+        public TrackedDatabase track(String branch, String host, int port, String database, String user) {
+            TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
+            trackedByBranch.put(branch, tracked);
+            return tracked;
+        }
+
+        @Override
+        public Optional<TrackedDatabase> trackedDatabase(String branch) {
+            return Optional.ofNullable(trackedByBranch.get(branch));
+        }
+
         private final Set<String> branches = new LinkedHashSet<>();
         private final Map<String, List<ChangeSet>> commitHistoryByBranch = new HashMap<>();
         private final List<String[]> createBranchCalls = new ArrayList<>();

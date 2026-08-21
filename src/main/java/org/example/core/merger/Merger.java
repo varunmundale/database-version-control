@@ -3,6 +3,7 @@ package org.example.core.merger;
 import org.example.core.differ.DatabaseDiff;
 import org.example.core.differ.Side;
 import org.example.core.differ.TableDiff;
+import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
 import org.example.models.schema.TableModel;
@@ -27,14 +28,16 @@ public final class Merger {
     private final Forker forker;
     private final Replayer replayer;
     private final DatabaseDiff databaseDiff;
+    private final BranchConnections connections;
 
-    public Merger(Forker forker, Replayer replayer) {
-        this(forker, replayer, new DatabaseDiff());
+    public Merger(Forker forker, Replayer replayer, BranchConnections connections) {
+        this(forker, replayer, connections, new DatabaseDiff());
     }
 
-    public Merger(Forker forker, Replayer replayer, DatabaseDiff databaseDiff) {
+    public Merger(Forker forker, Replayer replayer, BranchConnections connections, DatabaseDiff databaseDiff) {
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
         this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
+        this.connections = Objects.requireNonNull(connections, "connections must not be null");
         this.databaseDiff = Objects.requireNonNull(databaseDiff, "databaseDiff must not be null");
     }
 
@@ -56,9 +59,9 @@ public final class Merger {
 
         String stagingBranch = stagingBranchName(currentBranch, otherBranch);
         forker.fork(currentBranch, stagingBranch);
-        forker.branchDatabases().replay(forker.defaultDatabaseName(stagingBranch), otherOnly);
+        forker.branchDatabases().replay(connections.forBranch(stagingBranch), otherOnly);
 
-        forker.branchDatabases().replay(forker.defaultDatabaseName(currentBranch), otherOnly);
+        forker.branchDatabases().replay(connections.forBranch(currentBranch), otherOnly);
 
         long commitId = versioningService.createMergeCommit(currentBranch, otherBranch);
         return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());

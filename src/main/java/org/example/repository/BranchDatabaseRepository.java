@@ -1,6 +1,7 @@
 package org.example.repository;
 
 import org.example.config.BranchDatabaseConfig;
+import org.example.config.ConnectionSettings;
 import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.spi.ConnectorRegistry;
@@ -39,7 +40,12 @@ public final class BranchDatabaseRepository {
     }
 
     public SqlConnector connect(String database) throws SQLException {
-        return connectorFactory.connect(config.connectionTo(Objects.requireNonNull(database, "database must not be null")));
+        return connect(config.connectionTo(Objects.requireNonNull(database, "database must not be null")));
+    }
+
+    /** Connects to a database that need not live in the scratchpad at all - a tracked one, say. */
+    public SqlConnector connect(ConnectionSettings target) throws SQLException {
+        return connectorFactory.connect(Objects.requireNonNull(target, "target must not be null"));
     }
 
     /** Whether the scratchpad server is accepting connections yet - the probe container startup polls on. */
@@ -52,18 +58,30 @@ public final class BranchDatabaseRepository {
     }
 
     public void createDatabase(String database) {
-        execute(adminDatabase(), "CREATE DATABASE \"" + database + "\"", "create branch database '" + database + "'");
+        execute(config.connectionTo(adminDatabase()), "CREATE DATABASE \"" + database + "\"",
+                "create branch database '" + database + "'");
     }
 
     /** Runs one DDL statement against a branch's database. */
     public void apply(String database, String ddl) {
-        execute(database, ddl, "apply DDL to database '" + database + "'");
+        apply(config.connectionTo(database), ddl);
+    }
+
+    /** Runs one DDL statement against an explicitly addressed database. */
+    public void apply(ConnectionSettings target, String ddl) {
+        execute(target, ddl, "apply DDL to database '" + target.database() + "'");
     }
 
     /** Replays a history into a branch's database over a single connection, in order, stopping at the first failure. */
     public void replay(String database, List<ChangeSet> changesets) {
+        replay(config.connectionTo(database), changesets);
+    }
+
+    /** Replays a history into an explicitly addressed database. */
+    public void replay(ConnectionSettings target, List<ChangeSet> changesets) {
         Objects.requireNonNull(changesets, "changesets must not be null");
-        try (SqlConnector connector = connect(database)) {
+        String database = target.database();
+        try (SqlConnector connector = connect(target)) {
             for (ChangeSet changeset : changesets) {
                 try {
                     connector.execute(changeset.ddl());
@@ -78,8 +96,8 @@ public final class BranchDatabaseRepository {
         }
     }
 
-    private void execute(String database, String sql, String operation) {
-        try (SqlConnector connector = connect(database)) {
+    private void execute(ConnectionSettings target, String sql, String operation) {
+        try (SqlConnector connector = connect(target)) {
             connector.execute(sql);
         } catch (SQLException exception) {
             throw new RepositoryException("Could not " + operation + ": " + exception.getMessage(), exception);

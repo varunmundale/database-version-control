@@ -60,13 +60,14 @@ public final class BranchDatabaseConfig {
     }
 
     private static BranchDatabaseConfig load() {
+        var section = DbGitConfig.section("branchDatabases");
         return new BranchDatabaseConfig(
-                DbGitProperties.required("docker.container-name"),
-                DbGitProperties.required("docker.image"),
-                DbGitProperties.required("postgres.user"),
-                DbGitProperties.required("postgres.password"),
-                DbGitProperties.required("postgres.admin-database"),
-                Integer.parseInt(DbGitProperties.required("postgres.host-port")),
-                DbGitProperties.optional("postgres.dialect", "postgresql"));
+                DbGitConfig.requiredText(section, "containerName"),
+                DbGitConfig.requiredText(section, "image"),
+                DbGitConfig.requiredText(section, "user"),
+                DbGitConfig.requiredText(section, "password"),
+                DbGitConfig.requiredText(section, "adminDatabase"),
+                DbGitConfig.requiredInt(section, "hostPort"),
+                DbGitConfig.optionalText(section, "dialect", "postgresql"));
     }
 }

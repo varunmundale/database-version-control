@@ -8,6 +8,7 @@ import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
+import org.example.models.tracking.TrackedDatabase;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +52,8 @@ class DbGitCommandListenerTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         listener = new DbGitCommandListener(workingDirectory,
                 new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
+        // main tracks a real database now, so point it at one before any request arrives.
+        listener.execute("dbgit init --host localhost --port 5432 --database app --user tester");
         serverThread = new Thread(() -> {
             try {
                 listener.serve();
@@ -171,6 +175,20 @@ class DbGitCommandListenerTest {
     }
 
     private static final class InMemoryMetadataStore implements VersioningService {
+        private final Map<String, TrackedDatabase> trackedByBranch = new HashMap<>();
+
+        @Override
+        public TrackedDatabase track(String branch, String host, int port, String database, String user) {
+            TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
+            trackedByBranch.put(branch, tracked);
+            return tracked;
+        }
+
+        @Override
+        public Optional<TrackedDatabase> trackedDatabase(String branch) {
+            return Optional.ofNullable(trackedByBranch.get(branch));
+        }
+
         private final TreeSet<String> branches = new TreeSet<>(Set.of("main"));
         private final Map<Long, ChangeSet> changesetsById = new LinkedHashMap<>();
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();

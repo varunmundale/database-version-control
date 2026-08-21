@@ -6,6 +6,10 @@ cd "$(dirname "$0")"
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/
 
+# main is no longer an implicit scratchpad database - it tracks a real one, named here. Re-running
+# this is harmless: the same target signs the same, so init is idempotent.
+./dbgit init --host localhost --port 55432 --database postgres --user postgres --password postgres
+
 ./dbgit checkout -b mybranch
 
 ./dbgit add <<'EOF'

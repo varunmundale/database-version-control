@@ -8,6 +8,7 @@ import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
+import org.example.models.tracking.TrackedDatabase;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
@@ -24,6 +25,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,6 +41,8 @@ class DbGitCommandsTest {
     @TempDir
     Path workingDirectory;
 
+    private static final String MAIN_DATABASE = "app";
+
     private final List<DbGitCommandListener> listeners = new ArrayList<>();
 
     /** Each test drives the daemon directly rather than over a socket; the bound port is closed again in teardown. */
@@ -46,6 +50,8 @@ class DbGitCommandsTest {
         try {
             DbGitCommandListener listener = new DbGitCommandListener(workingDirectory, forker, 0);
             listeners.add(listener);
+            // main tracks a real database now, so point it at one before any test touches it.
+            listener.execute("dbgit init --host localhost --port 5432 --database " + MAIN_DATABASE + " --user tester");
             return listener;
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
@@ -97,7 +103,7 @@ class DbGitCommandsTest {
         DbGitCommandResult result = dbgit.add(ddl);
 
         assertEquals(List.of("Applied changeset #1 for branch 'main': table 'orders' now has 2 column(s)."), result.lines());
-        assertEquals("postgres", connectorFactory.connectedDatabase);
+        assertEquals(MAIN_DATABASE, connectorFactory.connectedDatabase);
         assertEquals(ddl, connectorFactory.executedSql);
         List<ChangeSet> changesets = metadataStore.changesetsForBranch("main");
         assertEquals(1, changesets.size());
@@ -280,7 +286,7 @@ class DbGitCommandsTest {
                 .toList();
         assertEquals(3, databasesAlterRanAgainst.size());
         assertTrue(databasesAlterRanAgainst.contains("feature_orders_postgres"));
-        assertTrue(databasesAlterRanAgainst.contains("postgres"));
+        assertTrue(databasesAlterRanAgainst.contains(MAIN_DATABASE));
         assertTrue(databasesAlterRanAgainst.stream().anyMatch(database -> database.startsWith("merge_main-feature_orders")));
 
         assertEquals(List.of("No differences between 'main' and 'feature/orders'."),
@@ -452,6 +458,20 @@ class DbGitCommandsTest {
     }
 
     private static final class InMemoryMetadataStore implements VersioningService {
+        private final Map<String, TrackedDatabase> trackedByBranch = new HashMap<>();
+
+        @Override
+        public TrackedDatabase track(String branch, String host, int port, String database, String user) {
+            TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
+            trackedByBranch.put(branch, tracked);
+            return tracked;
+        }
+
+        @Override
+        public Optional<TrackedDatabase> trackedDatabase(String branch) {
+            return Optional.ofNullable(trackedByBranch.get(branch));
+        }
+
         private final TreeSet<String> branches = new TreeSet<>(Set.of("main"));
         private final Map<Long, ChangeSet> changesetsById = new LinkedHashMap<>();
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
@@ -547,5 +567,78 @@ class DbGitCommandsTest {
             headCommitByBranch.put(branch, commitId);
             return commitId;
         }
+    }
+
+    @Test
+    void initRecordsWhatMainTracksAndSaysSo() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+
+        DbGitCommandResult result = dbgit.execute(
+                "dbgit init --host db.internal --port 6543 --database app_prod --user dbgit --password secret");
+
+        assertTrue(result.lines().getFirst().contains("app_prod@db.internal:6543"), result.lines().toString());
+        assertTrue(result.lines().get(1).startsWith("Signature: connection_"), result.lines().toString());
+    }
+
+    @Test
+    void initIsIdempotentForTheSameDatabase() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+        String command = "dbgit init --host db.internal --port 6543 --database app_prod --user dbgit";
+
+        String firstSignature = dbgit.execute(command).lines().get(1);
+        DbGitCommandResult second = dbgit.execute(command);
+
+        assertTrue(second.lines().getFirst().contains("already tracks"), second.lines().toString());
+        assertEquals(firstSignature, second.lines().get(1), "the same database always signs the same");
+    }
+
+    @Test
+    void initRepointsMainAtADifferentDatabase() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
+
+        DbGitCommandResult repointed = dbgit.execute(
+                "dbgit init --host db.internal --port 6543 --database app_staging --user dbgit");
+
+        assertTrue(repointed.lines().getFirst().contains("app_staging@db.internal:6543"), repointed.lines().toString());
+        assertTrue(repointed.lines().getFirst().contains("was app_prod@db.internal:6543"), repointed.lines().toString());
+    }
+
+    @Test
+    void initWritesCredentialsOnlyToTheLocalWorkspace() throws IOException {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+
+        dbgit.execute("dbgit init --host db.internal --database app_prod --user dbgit --password hunter2");
+
+        String localConfig = Files.readString(workingDirectory.resolve(".dbgit/config.json"));
+        assertTrue(localConfig.contains("hunter2"), "the password belongs in local .dbgit state");
+        assertTrue(localConfig.contains("app_prod"), localConfig);
+    }
+
+    @Test
+    void mainsDdlGoesToTheTrackedDatabaseRatherThanTheScratchpad() {
+        RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory,
+                new InMemoryMetadataStore()));
+        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
+
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+
+        assertEquals("app_prod", connectorFactory.connectedDatabase);
+    }
+
+    @Test
+    void initRejectsMissingConnectionDetails() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> dbgit.execute("dbgit init --host db.internal"));
+
+        assertTrue(exception.getMessage().contains("required"), exception.getMessage());
     }
 }

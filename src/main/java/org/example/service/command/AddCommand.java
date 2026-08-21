@@ -17,7 +17,7 @@ public final class AddCommand extends Command {
 
     public AddCommand(CommandContext context, String ddl) {
         super(context);
-        this.stager = new Stager(context.forker(), context.replayer());
+        this.stager = new Stager(context.forker(), context.replayer(), context.connections());
         this.ddl = Objects.requireNonNull(ddl, "ddl must not be null");
     }
 

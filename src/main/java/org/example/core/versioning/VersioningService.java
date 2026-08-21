@@ -2,9 +2,11 @@ package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
+import org.example.models.tracking.TrackedDatabase;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The versioning API the rest of dbgit works against: the source of truth for which branches exist and how each
@@ -43,6 +45,15 @@ public interface VersioningService {
      * chains. Moves {@code branch}'s HEAD to the new commit. Returns the new commit's id.
      */
     long createMergeCommit(String branch, String otherBranch);
+
+    /**
+     * Records which physical database a branch's DDL is applied to, replacing any previous record for that branch.
+     * Credential-free by construction - see {@link TrackedDatabase}. Returns what is now tracked.
+     */
+    TrackedDatabase track(String branch, String host, int port, String database, String user);
+
+    /** What the branch tracks, or empty if it has never been initialised. */
+    Optional<TrackedDatabase> trackedDatabase(String branch);
 
     /** The branch's changesets that have run against its database but aren't part of a commit yet. */
     default List<ChangeSet> appliedChangesets(String branch) {

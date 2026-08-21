@@ -1,5 +1,6 @@
 package org.example.core.stager;
 
+import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
 import org.example.models.schema.TableModel;
@@ -18,10 +19,12 @@ public final class Stager {
 
     private final Forker forker;
     private final Replayer replayer;
+    private final BranchConnections connections;
 
-    public Stager(Forker forker, Replayer replayer) {
+    public Stager(Forker forker, Replayer replayer, BranchConnections connections) {
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
         this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
+        this.connections = Objects.requireNonNull(connections, "connections must not be null");
     }
 
     public StageResult stage(String branch, String statement) {
@@ -33,7 +36,7 @@ public final class Stager {
 
         long changesetId = versioningService.stageChangeset(branch, statement);
 
-        forker.branchDatabases().apply(forker.defaultDatabaseName(branch), statement);
+        forker.branchDatabases().apply(connections.forBranch(branch), statement);
 
         versioningService.markApplied(changesetId);
         return new StageResult(changesetId, updated.name(), updated.columns().size());

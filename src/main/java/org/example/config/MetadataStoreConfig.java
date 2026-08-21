@@ -54,12 +54,13 @@ public final class MetadataStoreConfig {
     }
 
     private static MetadataStoreConfig load() {
+        var section = DbGitConfig.section("metadata");
         return new MetadataStoreConfig(
-                DbGitProperties.required("metadata.host"),
-                Integer.parseInt(DbGitProperties.required("metadata.port")),
-                DbGitProperties.required("metadata.user"),
-                DbGitProperties.required("metadata.password"),
-                DbGitProperties.required("metadata.admin-database"),
-                DbGitProperties.required("metadata.database"));
+                DbGitConfig.requiredText(section, "host"),
+                DbGitConfig.requiredInt(section, "port"),
+                DbGitConfig.requiredText(section, "user"),
+                DbGitConfig.requiredText(section, "password"),
+                DbGitConfig.requiredText(section, "adminDatabase"),
+                DbGitConfig.requiredText(section, "database"));
     }
 }

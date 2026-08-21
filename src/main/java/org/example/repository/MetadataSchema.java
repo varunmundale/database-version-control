@@ -22,6 +22,11 @@ final class MetadataSchema {
                 + "id BIGSERIAL PRIMARY KEY, branch_name TEXT NOT NULL REFERENCES branch_metadata(branch_name), "
                 + "ddl TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING', commit_id BIGINT REFERENCES branch_commits(id), "
                 + "applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+        ctx.execute("CREATE TABLE IF NOT EXISTS tracked_databases ("
+                + "branch_name TEXT PRIMARY KEY REFERENCES branch_metadata(branch_name), "
+                + "signature TEXT NOT NULL, host TEXT NOT NULL, port INT NOT NULL, "
+                + "database_name TEXT NOT NULL, db_user TEXT NOT NULL, "
+                + "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)");
         ctx.execute("INSERT INTO branch_metadata (branch_name, forked_from) VALUES ({0}, NULL) ON CONFLICT (branch_name) DO NOTHING",
                 DEFAULT_BRANCH);
     }

@@ -1,5 +1,7 @@
 package org.example.service;
 
+import org.example.core.forker.BranchConnections;
+import org.example.config.BranchDatabaseConfig;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
 import org.example.repository.DbGitLocalRepository;
@@ -41,7 +43,8 @@ public final class DbGitCommandListener implements Closeable {
     public DbGitCommandListener(Path workingDirectory, Forker forker, int port) throws IOException {
         DbGitLocalRepository repository = new DbGitLocalRepository(
                 Objects.requireNonNull(workingDirectory, "workingDirectory must not be null"));
-        this.context = new CommandContext(repository, Objects.requireNonNull(forker, "forker must not be null"), new Replayer());
+        this.context = new CommandContext(repository, Objects.requireNonNull(forker, "forker must not be null"),
+                new Replayer(), new BranchConnections(BranchDatabaseConfig.getInstance(), repository));
         this.commandFactory = new CommandFactory(context);
         this.serverSocket = new ServerSocket(port);
     }

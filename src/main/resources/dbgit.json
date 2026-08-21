@@ -1,0 +1,22 @@
+{
+  "service": {
+    "port": 47615
+  },
+  "metadata": {
+    "host": "localhost",
+    "port": 5432,
+    "user": "postgres",
+    "password": "postgres",
+    "adminDatabase": "postgres",
+    "database": "dbgit_metadata"
+  },
+  "branchDatabases": {
+    "containerName": "postgres-branches-scratchpad",
+    "image": "postgres:16-alpine",
+    "user": "postgres",
+    "password": "postgres",
+    "adminDatabase": "postgres",
+    "hostPort": 55432,
+    "dialect": "postgresql"
+  }
+}

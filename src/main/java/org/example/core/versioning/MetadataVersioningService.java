@@ -2,15 +2,18 @@ package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.CommitParents;
+import org.example.models.tracking.TrackedDatabase;
 import org.example.repository.BranchMetadataRepository;
 import org.example.repository.ChangesetRepository;
 import org.example.repository.CommitRepository;
 import org.example.repository.MetadataDatabase;
+import org.example.repository.TrackedDatabaseRepository;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -24,12 +27,26 @@ public final class MetadataVersioningService implements VersioningService {
     private final BranchMetadataRepository branchRepository;
     private final CommitRepository commitRepository;
     private final ChangesetRepository changesetRepository;
+    private final TrackedDatabaseRepository trackedDatabaseRepository;
 
     public MetadataVersioningService() {
         this.database = MetadataDatabase.getInstance();
         this.branchRepository = BranchMetadataRepository.getInstance();
         this.commitRepository = CommitRepository.getInstance();
         this.changesetRepository = ChangesetRepository.getInstance();
+        this.trackedDatabaseRepository = TrackedDatabaseRepository.getInstance();
+    }
+
+    @Override
+    public TrackedDatabase track(String branch, String host, int port, String database, String user) {
+        TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
+        this.database.execute(() -> trackedDatabaseRepository.upsert(tracked));
+        return tracked;
+    }
+
+    @Override
+    public Optional<TrackedDatabase> trackedDatabase(String branch) {
+        return database.query(() -> trackedDatabaseRepository.find(branch));
     }
 
     @Override
