@@ -1,16 +1,22 @@
 package org.example.service.command;
 
-import org.example.branch.BranchFork;
-import org.example.branch.DbGitRepository;
-import org.example.core.SchemaReplayer;
+import org.example.core.forker.Forker;
+import org.example.repository.DbGitLocalRepository;
+import org.example.core.replayer.Replayer;
+import org.example.core.versioning.VersioningService;
 
 import java.util.Objects;
 
 /** Everything a {@link Command} needs to run, assembled once by {@code DbGitService} and handed to each command it builds. */
-public record CommandContext(DbGitRepository repository, BranchFork branchFork, SchemaReplayer schemaReplayer) {
+public record CommandContext(DbGitLocalRepository repository, Forker forker, Replayer replayer) {
     public CommandContext {
         Objects.requireNonNull(repository, "repository must not be null");
-        Objects.requireNonNull(branchFork, "branchFork must not be null");
-        Objects.requireNonNull(schemaReplayer, "schemaReplayer must not be null");
+        Objects.requireNonNull(forker, "forker must not be null");
+        Objects.requireNonNull(replayer, "replayer must not be null");
+    }
+
+    /** The versioning service every branch-aware command reads and writes history through. */
+    public VersioningService versioningService() {
+        return forker.versioningService();
     }
 }

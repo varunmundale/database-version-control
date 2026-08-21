@@ -2,7 +2,6 @@ package org.example.service.command;
 
 import org.example.service.DbGitCommandResult;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 
@@ -20,7 +19,7 @@ public final class CheckoutCommand extends Command {
     }
 
     @Override
-    public DbGitCommandResult execute() throws IOException {
+    public DbGitCommandResult execute() {
         if (arguments.size() == 2 && arguments.get(0).equals("-b")) {
             return new CreateBranchCommand(context, arguments.get(1)).execute();
         }
@@ -30,8 +29,8 @@ public final class CheckoutCommand extends Command {
         throw new IllegalArgumentException("Usage: dbgit checkout <branch> | dbgit checkout -b <branch>");
     }
 
-    private DbGitCommandResult checkoutExisting(String branch) throws IOException {
-        if (!context.branchFork().metadataStore().branches().contains(branch)) {
+    private DbGitCommandResult checkoutExisting(String branch) {
+        if (!context.versioningService().branches().contains(branch)) {
             throw new IllegalArgumentException("Unknown branch: " + branch);
         }
         context.repository().checkout(branch);

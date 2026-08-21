@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /**
  * A column, either fully identified as part of a {@link TableModel} or, via {@link #unassigned}, just as a
- * vendor's DDL grammar described it - before {@link org.example.core.SchemaOperationApplier} has derived its real
+ * vendor's DDL grammar described it - before {@link org.example.core.replayer.SchemaOperationApplier} has derived its real
  * stable id from the table it belongs to and given it one with {@link #withId}.
  */
 public record ColumnModel(StableId id, String name, String nativeType, boolean nullable, String defaultValue) {

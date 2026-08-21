@@ -10,17 +10,15 @@ public final class MetadataStoreConfig {
     private final String password;
     private final String adminDatabase;
     private final String database;
-    private final String dialect;
 
     private MetadataStoreConfig(String host, int port, String user, String password, String adminDatabase,
-                                 String database, String dialect) {
+                                 String database) {
         this.host = host;
         this.port = port;
         this.user = user;
         this.password = password;
         this.adminDatabase = adminDatabase;
         this.database = database;
-        this.dialect = dialect;
     }
 
     public static MetadataStoreConfig getInstance() {
@@ -51,10 +49,6 @@ public final class MetadataStoreConfig {
         return database;
     }
 
-    public String dialect() {
-        return dialect;
-    }
-
     public ConnectionSettings connectionTo(String database) {
         return new ConnectionSettings(host, port, user, password, database);
     }
@@ -66,7 +60,6 @@ public final class MetadataStoreConfig {
                 DbGitProperties.required("metadata.user"),
                 DbGitProperties.required("metadata.password"),
                 DbGitProperties.required("metadata.admin-database"),
-                DbGitProperties.required("metadata.database"),
-                DbGitProperties.optional("metadata.dialect", "postgresql"));
+                DbGitProperties.required("metadata.database"));
     }
 }

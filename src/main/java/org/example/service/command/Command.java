@@ -2,7 +2,6 @@ package org.example.service.command;
 
 import org.example.service.DbGitCommandResult;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 
@@ -19,7 +18,7 @@ public abstract class Command {
         this.context = Objects.requireNonNull(context, "context must not be null");
     }
 
-    public abstract DbGitCommandResult execute() throws IOException;
+    public abstract DbGitCommandResult execute();
 
     protected static DbGitCommandResult print(List<String> lines) {
         lines.forEach(System.out::println);

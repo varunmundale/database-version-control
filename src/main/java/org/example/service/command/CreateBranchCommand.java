@@ -2,7 +2,6 @@ package org.example.service.command;
 
 import org.example.service.DbGitCommandResult;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 
@@ -16,9 +15,9 @@ public final class CreateBranchCommand extends Command {
     }
 
     @Override
-    public DbGitCommandResult execute() throws IOException {
+    public DbGitCommandResult execute() {
         String fromBranch = context.repository().currentBranch();
-        context.branchFork().fork(fromBranch, branch);
+        context.forker().fork(fromBranch, branch);
         context.repository().checkout(branch);
         return print(List.of("Switched to a new branch '" + branch + "'."));
     }

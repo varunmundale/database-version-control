@@ -7,7 +7,7 @@ import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.alter.AlterExpression;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
 import org.example.parsers.DdlParser;
-import org.example.core.SchemaOperation;
+import org.example.core.replayer.SchemaOperation;
 import org.example.models.schema.ColumnModel;
 
 import java.util.List;

@@ -1,7 +1,6 @@
 package org.example.connectors;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -16,8 +15,8 @@ import java.util.Objects;
 public abstract class JdbcConnector implements SqlConnector {
     private final Connection connection;
 
-    protected JdbcConnector(String jdbcUrl) throws SQLException {
-        connection = DriverManager.getConnection(Objects.requireNonNull(jdbcUrl, "jdbcUrl must not be null"));
+    protected JdbcConnector(Connection connection) {
+        this.connection = Objects.requireNonNull(connection, "connection must not be null");
     }
 
     @Override

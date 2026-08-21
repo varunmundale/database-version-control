@@ -1,6 +1,6 @@
 package org.example.parsers.postgres;
 
-import org.example.core.SchemaOperation;
+import org.example.core.replayer.SchemaOperation;
 import org.example.models.schema.ColumnModel;
 import org.junit.jupiter.api.Test;
 

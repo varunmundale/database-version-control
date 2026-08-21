@@ -1,10 +1,10 @@
 package org.example.service.command;
 
-import org.example.core.DatabaseDiff;
-import org.example.core.HistoryDiffFormatter;
+import org.example.core.differ.DatabaseDiff;
+import org.example.core.differ.HistoryDiffFormatter;
 import org.example.models.versioning.ChangeSet;
 import org.example.service.DbGitCommandResult;
-import org.example.versioning.BranchMetadataStore;
+import org.example.core.versioning.VersioningService;
 
 import java.util.List;
 import java.util.Objects;
@@ -29,17 +29,17 @@ public final class DiffCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        BranchMetadataStore metadataStore = context.branchFork().metadataStore();
-        if (!metadataStore.branches().contains(left)) {
+        VersioningService versioningService = context.versioningService();
+        if (!versioningService.branches().contains(left)) {
             throw new IllegalArgumentException("Unknown branch: " + left);
         }
-        if (!metadataStore.branches().contains(right)) {
+        if (!versioningService.branches().contains(right)) {
             throw new IllegalArgumentException("Unknown branch: " + right);
         }
 
-        List<ChangeSet> leftHistory = metadataStore.commitHistory(left);
-        List<ChangeSet> rightHistory = metadataStore.commitHistory(right);
-        HistoryDiffFormatter historyDiffFormatter = new HistoryDiffFormatter(context.schemaReplayer(), databaseDiff);
+        List<ChangeSet> leftHistory = versioningService.commitHistory(left);
+        List<ChangeSet> rightHistory = versioningService.commitHistory(right);
+        HistoryDiffFormatter historyDiffFormatter = new HistoryDiffFormatter(context.replayer(), databaseDiff);
         List<String> lines = historyDiffFormatter.format(left, right, leftHistory, rightHistory);
 
         if (lines.isEmpty()) {

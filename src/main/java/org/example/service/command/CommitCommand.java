@@ -1,25 +1,24 @@
 package org.example.service.command;
 
-import org.example.core.BranchCommitter;
-import org.example.core.CommitResult;
+import org.example.core.committer.Committer;
+import org.example.core.committer.CommitResult;
 import org.example.service.DbGitCommandResult;
 
-import java.io.IOException;
 import java.util.List;
 
-/** {@code dbgit commit} - delegates folding the current branch's APPLIED changesets into one new commit to {@link BranchCommitter}. */
+/** {@code dbgit commit} - delegates folding the current branch's APPLIED changesets into one new commit to {@link Committer}. */
 public final class CommitCommand extends Command {
-    private final BranchCommitter branchCommitter;
+    private final Committer committer;
 
     public CommitCommand(CommandContext context) {
         super(context);
-        this.branchCommitter = new BranchCommitter(context.branchFork().metadataStore());
+        this.committer = new Committer(context.versioningService());
     }
 
     @Override
-    public DbGitCommandResult execute() throws IOException {
+    public DbGitCommandResult execute() {
         String branch = context.repository().currentBranch();
-        CommitResult result = branchCommitter.commit(branch);
+        CommitResult result = committer.commit(branch);
         return switch (result) {
             case CommitResult.NothingToCommit ignored -> print(List.of("Nothing to commit for branch '" + branch + "'."));
             case CommitResult.Success success -> print(List.of("Created commit #" + success.commitId() + " for branch '"

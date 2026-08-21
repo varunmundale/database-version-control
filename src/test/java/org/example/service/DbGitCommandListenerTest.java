@@ -1,8 +1,8 @@
 package org.example.service;
 
-import org.example.branch.BranchFork;
-import org.example.branch.docker.CommandResult;
-import org.example.branch.docker.CommandRunner;
+import org.example.core.forker.Forker;
+import org.example.core.forker.docker.CommandResult;
+import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
 import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
@@ -10,7 +10,7 @@ import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
-import org.example.versioning.BranchMetadataStore;
+import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +48,7 @@ class DbGitCommandListenerTest {
     @BeforeEach
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService dbGitService = new DbGitService(workingDirectory, new BranchFork(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+        DbGitService dbGitService = new DbGitService(workingDirectory, new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
         listener = new DbGitCommandListener(dbGitService, 0);
         serverThread = new Thread(() -> {
             try {
@@ -170,7 +170,7 @@ class DbGitCommandListenerTest {
         }
     }
 
-    private static final class InMemoryMetadataStore implements BranchMetadataStore {
+    private static final class InMemoryMetadataStore implements VersioningService {
         private final TreeSet<String> branches = new TreeSet<>(Set.of("main"));
         private final Map<Long, ChangeSet> changesetsById = new LinkedHashMap<>();
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
