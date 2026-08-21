@@ -20,9 +20,14 @@ echo
 echo "=== main: create the base table ==="
 ./dbgit add <<'EOF'
 CREATE TABLE invoices (
-    id SERIAL PRIMARY KEY,
+    id SERIAL,
     amount DECIMAL(10, 2)
 );
+EOF
+
+# CREATE TABLE defines columns only; constraints are their own statements.
+./dbgit add <<'EOF'
+ALTER TABLE invoices ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
 EOF
 ./dbgit commit
 

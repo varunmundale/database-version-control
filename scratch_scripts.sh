@@ -10,13 +10,21 @@ rm -rf .dbgit/
 
 ./dbgit add <<'EOF'
 CREATE TABLE employees (
-    id SERIAL PRIMARY KEY,
+    id SERIAL,
     name VARCHAR(100) NOT NULL,
-    email VARCHAR(150) UNIQUE,
+    email VARCHAR(150),
     age INT,
     salary DECIMAL(10, 2),
     department VARCHAR(100)
 );
+EOF
+
+# CREATE TABLE defines columns only; constraints are their own statements.
+./dbgit add <<'EOF'
+ALTER TABLE employees ADD CONSTRAINT employees_pkey PRIMARY KEY (id);
+EOF
+./dbgit add <<'EOF'
+ALTER TABLE employees ADD CONSTRAINT employees_email_key UNIQUE (email);
 EOF
 
 ./dbgit commit
