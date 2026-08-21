@@ -11,7 +11,6 @@ import org.example.connectors.SqlTransaction;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.service.DbGitCommandListener;
-import org.example.service.DbGitService;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,8 +47,8 @@ class DbGitClientTest {
     @BeforeEach
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService dbGitService = new DbGitService(workingDirectory, new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
-        listener = new DbGitCommandListener(dbGitService, 0);
+        listener = new DbGitCommandListener(workingDirectory,
+                new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
         serverThread = new Thread(() -> {
             try {
                 listener.serve();

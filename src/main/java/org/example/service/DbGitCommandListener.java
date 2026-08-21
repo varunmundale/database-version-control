@@ -1,30 +1,48 @@
 package org.example.service;
 
-import java.io.BufferedReader;
+import org.example.core.forker.Forker;
+import org.example.core.replayer.Replayer;
+import org.example.repository.DbGitLocalRepository;
+import org.example.service.command.AddCommand;
+import org.example.service.command.Command;
+import org.example.service.command.CommandContext;
+import org.example.service.command.CommandFactory;
+
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
-/** Listens on a local TCP socket and runs each incoming command line through a {@link DbGitService}. */
+/**
+ * The {@code dbService} daemon: listens on a local TCP socket and runs each incoming command line. Owns the accept
+ * loop and the shape of a request - a command line, optionally followed by a body - while the byte-level work of
+ * reading and writing belongs to {@link SocketReader} and {@link SocketWriter}, and picking the {@link Command} for
+ * a given argument list belongs to {@link CommandFactory}.
+ *
+ * <p>{@link #execute} and {@link #add} are the same entry points the socket path uses, callable directly by anyone
+ * embedding the daemon - which is how the command tests drive every {@code dbgit} verb without a client.
+ */
 public final class DbGitCommandListener implements Closeable {
     private static final String ADD_COMMAND = "dbgit add";
 
-    private final DbGitService dbGitService;
+    private final CommandContext context;
+    private final CommandFactory commandFactory;
     private final ServerSocket serverSocket;
 
     public DbGitCommandListener(Path workingDirectory, int port) throws IOException {
-        this(new DbGitService(workingDirectory), port);
+        this(workingDirectory, new Forker(), port);
     }
 
-    public DbGitCommandListener(DbGitService dbGitService, int port) throws IOException {
-        this.dbGitService = Objects.requireNonNull(dbGitService, "dbGitService must not be null");
+    public DbGitCommandListener(Path workingDirectory, Forker forker, int port) throws IOException {
+        DbGitLocalRepository repository = new DbGitLocalRepository(
+                Objects.requireNonNull(workingDirectory, "workingDirectory must not be null"));
+        this.context = new CommandContext(repository, Objects.requireNonNull(forker, "forker must not be null"), new Replayer());
+        this.commandFactory = new CommandFactory(context);
         this.serverSocket = new ServerSocket(port);
     }
 
@@ -51,38 +69,44 @@ public final class DbGitCommandListener implements Closeable {
         serverSocket.close();
     }
 
+    public DbGitCommandResult execute(String commandLine) {
+        Objects.requireNonNull(commandLine, "commandLine must not be null");
+        return execute(Arrays.stream(commandLine.trim().split("\\s+")).toList());
+    }
+
+    public DbGitCommandResult execute(List<String> arguments) {
+        return commandFactory.create(arguments).execute();
+    }
+
+    /** {@code dbgit add} arrives separately because its DDL body comes from stdin rather than the argument list. */
+    public DbGitCommandResult add(String ddl) {
+        return new AddCommand(context, ddl).execute();
+    }
+
     private void handle(Socket socket) throws IOException {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
-            String commandLine = reader.readLine();
+        try (SocketReader reader = new SocketReader(socket);
+             SocketWriter writer = new SocketWriter(socket)) {
+            String commandLine = reader.nextLine();
             if (commandLine == null || commandLine.isBlank()) {
-                writer.println("ERR");
-                writer.println("No command received.");
+                writer.writeError("No command received.");
                 return;
             }
             try {
-                DbGitCommandResult result = commandLine.trim().equals(ADD_COMMAND)
-                        ? dbGitService.add(readRemaining(reader))
-                        : dbGitService.execute(commandLine);
-                writer.println("OK");
-                result.lines().forEach(writer::println);
+                writer.writeOk(run(commandLine, reader).lines());
             } catch (RuntimeException exception) {
-                writer.println("ERR");
-                writer.println(exception.getMessage());
+                writer.writeError(exception.getMessage());
             }
         }
     }
 
-    /** Reads the multiline DDL body that follows a {@code dbgit add} header line, up to the client's EOF. */
-    private static String readRemaining(BufferedReader reader) throws IOException {
-        StringBuilder body = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            if (!body.isEmpty()) {
-                body.append(System.lineSeparator());
-            }
-            body.append(line);
+    /**
+     * Only {@code dbgit add} carries a body - its DDL can span lines, so it arrives after the command line rather
+     * than inside it - so only that branch asks the reader for what is left.
+     */
+    private DbGitCommandResult run(String commandLine, SocketReader reader) throws IOException {
+        if (commandLine.trim().equals(ADD_COMMAND)) {
+            return add(reader.remaining());
         }
-        return body.toString();
+        return execute(commandLine);
     }
 }

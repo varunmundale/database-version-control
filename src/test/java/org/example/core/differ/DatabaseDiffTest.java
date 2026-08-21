@@ -138,7 +138,7 @@ class DatabaseDiffTest {
         return new ChangeSet(idSequence++, "test", ddl, ChangesetStatus.COMMIT, Instant.now());
     }
 
-    /** Builds a fixture TableModel by replaying one or more DDL statements, in order, through the same replay engine DbGitService uses. */
+    /** Builds a fixture TableModel by replaying one or more DDL statements, in order, through the same replay engine the daemon uses. */
     private TableModel table(String... ddls) {
         List<ChangeSet> changesets = new ArrayList<>();
         long id = 1;

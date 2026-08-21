@@ -11,10 +11,12 @@ import org.example.connectors.SqlTransaction;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -33,17 +35,37 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DbGitServiceTest {
+class DbGitCommandsTest {
     @TempDir
     Path workingDirectory;
+
+    private final List<DbGitCommandListener> listeners = new ArrayList<>();
+
+    /** Each test drives the daemon directly rather than over a socket; the bound port is closed again in teardown. */
+    private DbGitCommandListener listener(Forker forker) {
+        try {
+            DbGitCommandListener listener = new DbGitCommandListener(workingDirectory, forker, 0);
+            listeners.add(listener);
+            return listener;
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+
+    @AfterEach
+    void closeListeners() throws IOException {
+        for (DbGitCommandListener listener : listeners) {
+            listener.close();
+        }
+    }
 
     @Test
     void createsABranchDatabaseAndWritesLocalDbGitState() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new NoOpConnectorFactory(), metadataStore));
+        DbGitCommandListener dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), metadataStore));
 
-        DbGitCommandResult result = service.execute("dbgit checkout -b feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit checkout -b feature/orders");
 
         assertEquals(List.of("Switched to a new branch 'feature/orders'."), result.lines());
         assertEquals("feature/orders", Files.readString(workingDirectory.resolve(".dbgit/HEAD")).trim());
@@ -54,11 +76,11 @@ class DbGitServiceTest {
     @Test
     void checksOutExistingBranchesAndListsAllBranches() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
-        service.execute("dbgit checkout -b feature/orders");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+        dbgit.execute("dbgit checkout -b feature/orders");
 
-        DbGitCommandResult checkout = service.execute("dbgit checkout main");
-        DbGitCommandResult branchList = service.execute("dbgit branch");
+        DbGitCommandResult checkout = dbgit.execute("dbgit checkout main");
+        DbGitCommandResult branchList = dbgit.execute("dbgit branch");
 
         assertEquals(List.of("Switched to branch 'main'."), checkout.lines());
         assertEquals(List.of("  feature/orders", "* main"), branchList.lines());
@@ -69,10 +91,10 @@ class DbGitServiceTest {
     void addsACreateTableStatementBuildsTheInternalRepresentationAndAppliesTheChangeset() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
         String ddl = "CREATE TABLE orders (\n  id INT PRIMARY KEY,\n  name TEXT\n);";
 
-        DbGitCommandResult result = service.add(ddl);
+        DbGitCommandResult result = dbgit.add(ddl);
 
         assertEquals(List.of("Applied changeset #1 for branch 'main': table 'orders' now has 2 column(s)."), result.lines());
         assertEquals("postgres", connectorFactory.connectedDatabase);
@@ -87,11 +109,11 @@ class DbGitServiceTest {
     void appliesAnAlterStatementOnTopOfThePreviouslyAppliedInternalRepresentation() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), connectorFactory, metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
         String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;";
 
-        DbGitCommandResult result = service.add(alter);
+        DbGitCommandResult result = dbgit.add(alter);
 
         assertEquals(List.of("Applied changeset #2 for branch 'main': table 'orders' now has 2 column(s)."), result.lines());
         assertEquals(alter, connectorFactory.executedSql);
@@ -102,9 +124,9 @@ class DbGitServiceTest {
     void refusesToAlterAnUnknownTableWithoutTouchingTheDatabaseOrTheServer() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
 
-        assertThrows(IllegalArgumentException.class, () -> service.add("ALTER TABLE orders ADD COLUMN total NUMERIC;"));
+        assertThrows(IllegalArgumentException.class, () -> dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC;"));
 
         assertNull(connectorFactory.executedSql);
         assertTrue(metadataStore.changesetsForBranch("main").isEmpty());
@@ -113,11 +135,11 @@ class DbGitServiceTest {
     @Test
     void commitsAllAppliedChangesetsIntoOneCommitWithForwardAndBackwardPointers() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
 
-        DbGitCommandResult result = service.execute("dbgit commit");
+        DbGitCommandResult result = dbgit.execute("dbgit commit");
 
         assertEquals(List.of("Created commit #1 for branch 'main' with 2 changeset(s)."), result.lines());
         assertTrue(metadataStore.changesetsForBranch("main").stream().allMatch(changeset -> changeset.status() == ChangesetStatus.COMMIT));
@@ -129,9 +151,9 @@ class DbGitServiceTest {
 
     @Test
     void reportsNothingToCommitWhenNoChangesetsAreApplied() {
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
-        DbGitCommandResult result = service.execute("dbgit commit");
+        DbGitCommandResult result = dbgit.execute("dbgit commit");
 
         assertEquals(List.of("Nothing to commit for branch 'main'."), result.lines());
     }
@@ -139,11 +161,11 @@ class DbGitServiceTest {
     @Test
     void onlyAppliedChangesetsAreEverCommittedTwice() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
 
-        DbGitCommandResult result = service.execute("dbgit commit");
+        DbGitCommandResult result = dbgit.execute("dbgit commit");
 
         assertEquals(List.of("Nothing to commit for branch 'main'."), result.lines());
     }
@@ -152,12 +174,12 @@ class DbGitServiceTest {
     void reportsNoDifferencesWhenBranchesShareTheSameCommittedSchema() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
 
-        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit diff main feature/orders");
 
         assertEquals(List.of("No differences between 'main' and 'feature/orders'."), result.lines());
     }
@@ -166,17 +188,17 @@ class DbGitServiceTest {
     void diffPrintsATreeBringingBothSidesConflictingStatementsTogetherUnderTheConflictingColumn() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
-        service.add("ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout main");
-        service.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
-        service.execute("dbgit commit");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total INT NOT NULL;");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout main");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
+        dbgit.execute("dbgit commit");
 
-        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit diff main feature/orders");
 
         // Both branches added a 'total' column - the same object by stable id - with different types, so
         // DatabaseDiff flags it as a real conflict and both branches' statements against it are grouped together
@@ -194,17 +216,17 @@ class DbGitServiceTest {
     void renamingAColumnOnOneBranchWhileTheOtherModifiesItIsFlaggedAsAConflict() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
-        service.add("ALTER TABLE orders RENAME COLUMN col1 TO col2;");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout main");
-        service.add("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;");
-        service.execute("dbgit commit");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY, col1 NUMERIC(10,2));");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.add("ALTER TABLE orders RENAME COLUMN col1 TO col2;");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout main");
+        dbgit.add("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;");
+        dbgit.execute("dbgit commit");
 
-        DbGitCommandResult result = service.execute("dbgit diff main feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit diff main feature/orders");
 
         // Same underlying column: renamed on feature/orders, modified under its old name on main - one conflict,
         // not an unrelated "col1 disappeared" / "col2 appeared" pair, so both statements land under one node.
@@ -215,11 +237,10 @@ class DbGitServiceTest {
 
     @Test
     void refusesToDiffAnUnknownBranch() {
-        DbGitService service = new DbGitService(workingDirectory,
-                new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> service.execute("dbgit diff main unknown-branch"));
+                () -> dbgit.execute("dbgit diff main unknown-branch"));
 
         assertTrue(exception.getMessage().contains("Unknown branch"));
     }
@@ -229,16 +250,16 @@ class DbGitServiceTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, connectorFactory, metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
+        DbGitCommandListener dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
         String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);";
-        service.add(alter);
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout main");
+        dbgit.add(alter);
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout main");
 
-        DbGitCommandResult result = service.execute("dbgit merge feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit merge feature/orders");
 
         assertEquals(List.of(
                 "Merged 'feature/orders' into 'main' as commit #3, applying 1 changeset(s).",
@@ -263,25 +284,25 @@ class DbGitServiceTest {
         assertTrue(databasesAlterRanAgainst.stream().anyMatch(database -> database.startsWith("merge_main-feature_orders")));
 
         assertEquals(List.of("No differences between 'main' and 'feature/orders'."),
-                service.execute("dbgit diff main feature/orders").lines());
+                dbgit.execute("dbgit diff main feature/orders").lines());
     }
 
     @Test
     void mergeRejectsWhenBothBranchesConflictOnTheSameColumn() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
-        service.add("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout main");
-        service.add("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
-        service.execute("dbgit commit");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY, total NUMERIC(10,2));");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.add("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout main");
+        dbgit.add("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
+        dbgit.execute("dbgit commit");
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
-                () -> service.execute("dbgit merge feature/orders"));
+                () -> dbgit.execute("dbgit merge feature/orders"));
 
         assertTrue(exception.getMessage().contains("conflicting changes"));
         assertTrue(exception.getMessage().contains("orders"));
@@ -295,13 +316,13 @@ class DbGitServiceTest {
     void mergeReportsAlreadyUpToDateWhenTheOtherBranchHasNothingNew() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
-        service.execute("dbgit checkout -b feature/orders");
-        service.execute("dbgit checkout main");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.execute("dbgit checkout main");
 
-        DbGitCommandResult result = service.execute("dbgit merge feature/orders");
+        DbGitCommandResult result = dbgit.execute("dbgit merge feature/orders");
 
         assertEquals(List.of("Already up to date."), result.lines());
         assertTrue(metadataStore.branches().stream().noneMatch(branch -> branch.startsWith("merge/")));
@@ -309,22 +330,20 @@ class DbGitServiceTest {
 
     @Test
     void mergeRefusesAnUnknownBranch() {
-        DbGitService service = new DbGitService(workingDirectory,
-                new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> service.execute("dbgit merge unknown-branch"));
+                () -> dbgit.execute("dbgit merge unknown-branch"));
 
         assertTrue(exception.getMessage().contains("Unknown branch"));
     }
 
     @Test
     void mergeRefusesMergingABranchIntoItself() {
-        DbGitService service = new DbGitService(workingDirectory,
-                new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> service.execute("dbgit merge main"));
+                () -> dbgit.execute("dbgit merge main"));
 
         assertTrue(exception.getMessage().contains("itself"));
     }
@@ -333,11 +352,11 @@ class DbGitServiceTest {
     void forkedBranchesSharePriorCommitHistoryWithoutCreatingNewCommits() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitService service = new DbGitService(workingDirectory, new Forker(runner, new RecordingConnectorFactory(), metadataStore));
-        service.add("CREATE TABLE orders (id INT PRIMARY KEY);");
-        service.execute("dbgit commit");
+        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT PRIMARY KEY);");
+        dbgit.execute("dbgit commit");
 
-        service.execute("dbgit checkout -b feature/orders");
+        dbgit.execute("dbgit checkout -b feature/orders");
 
         List<ChangeSet> mainHistory = metadataStore.commitHistory("main");
         List<ChangeSet> featureHistory = metadataStore.commitHistory("feature/orders");

@@ -7,7 +7,7 @@ import org.example.core.versioning.VersioningService;
 
 import java.util.Objects;
 
-/** Everything a {@link Command} needs to run, assembled once by {@code DbGitService} and handed to each command it builds. */
+/** Everything a {@link Command} needs to run, assembled once by {@code DbGitCommandListener} and handed to each command it builds. */
 public record CommandContext(DbGitLocalRepository repository, Forker forker, Replayer replayer) {
     public CommandContext {
         Objects.requireNonNull(repository, "repository must not be null");
