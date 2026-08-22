@@ -75,6 +75,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
+                <configuration>
+                    <!-- Silences the "restricted method" native-access warning JNA prints when testcontainers
+                         (MetadataStore, MySqlConnectorTest) talks to Docker - pure noise, not a real diagnostic. -->
+                    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
