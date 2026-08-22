@@ -6,7 +6,7 @@ import org.example.models.schema.ConstraintType;
 import java.util.List;
 
 /**
- * A single DDL statement's meaning, extracted from vendor-specific syntax by a {@link org.example.parsers.DdlParser}
+ * A single DDL statement's meaning, extracted from vendor-specific syntax by a {@link org.example.adapters.DdlParser}
  * into a shape {@link SchemaOperationApplier} can apply without knowing anything about that syntax. This is the
  * seam between "understanding what a statement says" (per vendor) and "changing the model accordingly" (shared).
  *

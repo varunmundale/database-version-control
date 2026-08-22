@@ -1,4 +1,4 @@
-package org.example.parsers;
+package org.example.adapters;
 
 import org.example.core.replayer.SchemaOperation;
 

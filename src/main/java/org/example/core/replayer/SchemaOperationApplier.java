@@ -11,7 +11,7 @@ import java.util.function.UnaryOperator;
 
 /**
  * Applies an already-parsed {@link SchemaOperation} to the internal model, with no knowledge of any vendor's DDL
- * syntax. Every {@link org.example.parsers.DdlParser}, whatever dialect it understands, produces operations that
+ * syntax. Every {@link org.example.adapters.DdlParser}, whatever dialect it understands, produces operations that
  * land here unchanged.
  *
  * <p>Each application opens a {@link TableEditor} on the table the operation names, then edits the one member list

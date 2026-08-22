@@ -1,7 +1,7 @@
-package org.example.unit.parsers.postgres;
+package org.example.unit.adapters.postgres;
 
 
-import org.example.parsers.postgres.PostgresDdlParser;
+import org.example.adapters.postgres.PostgresDdlParser;
 import org.example.core.replayer.SchemaOperation;
 import org.example.models.schema.ColumnModel;
 import org.example.models.schema.ConstraintType;
@@ -124,18 +124,13 @@ class PostgresDdlParserTest {
     }
 
     /**
-     * MySQL's retype spelling: {@code MODIFY COLUMN} rather than {@code ALTER COLUMN ... TYPE}. Both produce the
-     * same {@link SchemaOperation.AlterColumnType} - the model only cares that the column's type changed, not which
-     * dialect's syntax said so - so a MySQL branch's DDL validates and replays the same way a Postgres one does.
+     * MySQL's retype spelling. PostgresDdlParser is strict to Postgres's own grammar - see
+     * {@code org.example.adapters.mysql.MySqlDdlParserTest} for the same statement accepted by the parser that
+     * understands it.
      */
     @Test
-    void parsesModifyColumnAsTheSameAlterColumnTypeMySqlSpells() {
-        SchemaOperation.AlterColumnType operation = (SchemaOperation.AlterColumnType) parser.parse(
-                "ALTER TABLE orders MODIFY COLUMN col1 BIGINT");
-
-        assertEquals("orders", operation.tableName());
-        assertEquals("col1", operation.columnName());
-        assertEquals("BIGINT", operation.newType());
+    void rejectsMySqlsModifyColumnSpelling() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parse("ALTER TABLE orders MODIFY COLUMN col1 BIGINT"));
     }
 
     @Test
