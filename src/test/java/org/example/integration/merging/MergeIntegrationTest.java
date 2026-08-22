@@ -143,6 +143,91 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
                 "num's history must be untouched by the rejected merge");
     }
 
+    /**
+     * A rejected merge is not a dead end: {@code dbgit} has no notion of an automatic conflict resolution, so the
+     * only way past a genuine conflict is to add a new, compensating DDL statement - the same way any other change
+     * is staged, via {@code dbgit add} + {@code dbgit commit} - that makes the two branches agree again on the
+     * conflicting column, then retry the merge. Here the compensation lands on the *current* branch ('num'),
+     * retyping 'amount' to match what 'big' already settled on.
+     */
+    @Test
+    void aMergeConflictCanBeResolvedByAddingACompensatingStatementToTheCurrentBranch() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("""
+                CREATE TABLE invoices (
+                    id SERIAL,
+                    amount DECIMAL(10, 2)
+                );""");
+        add("ALTER TABLE invoices ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "num");
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE NUMERIC(14, 4);");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        dbgit("checkout", "-b", "big");
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE BIGINT;");
+        dbgit("commit");
+
+        dbgit("checkout", "num");
+        CommandOutput rejected = cli.run("merge", "big");
+        assertTrue(rejected.failed(), rejected.text());
+        assertTrue(rejected.mentions("conflicting changes to table 'invoices', column 'amount'"), rejected.text());
+        assertTrue(rejected.mentions(
+                "Resolve by adding a compensating DDL statement ('dbgit add' + 'dbgit commit') to 'num' or 'big'"),
+                rejected.text());
+
+        // Resolve on 'num' (the current branch): retype 'amount' to the same type 'big' already carries, so the
+        // two branches' replayed schemas agree again for that column.
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE BIGINT;");
+        dbgit("commit");
+        assertFalse(dbgit("diff", "num", "big").out().stream().anyMatch(line -> line.contains("(conflicting)")),
+                "amount should no longer be conflicting once both branches agree on its type");
+
+        CommandOutput merged = dbgit("merge", "big");
+        assertTrue(merged.out().getFirst().startsWith("Merged 'big' into 'num' as commit #"), merged.text());
+        assertEquals("bigint", schema.columnType(databaseOf("num"), "invoices", "amount"));
+    }
+
+    /** The same resolution, but the compensating statement lands on the *other* branch ('big') instead. */
+    @Test
+    void aMergeConflictCanBeResolvedByAddingACompensatingStatementToTheOtherBranch() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("""
+                CREATE TABLE invoices (
+                    id SERIAL,
+                    amount DECIMAL(10, 2)
+                );""");
+        add("ALTER TABLE invoices ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "num");
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE NUMERIC(14, 4);");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        dbgit("checkout", "-b", "big");
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE BIGINT;");
+        dbgit("commit");
+
+        dbgit("checkout", "num");
+        CommandOutput rejected = cli.run("merge", "big");
+        assertTrue(rejected.failed(), rejected.text());
+
+        // Resolve on 'big' (the other branch) instead: retype 'amount' to match 'num's own type.
+        dbgit("checkout", "big");
+        add("ALTER TABLE invoices ALTER COLUMN amount TYPE NUMERIC(14, 4);");
+        dbgit("commit");
+
+        dbgit("checkout", "num");
+        CommandOutput merged = dbgit("merge", "big");
+        assertTrue(merged.out().getFirst().startsWith("Merged 'big' into 'num' as commit #"), merged.text());
+        assertEquals("numeric", schema.columnType(databaseOf("num"), "invoices", "amount"));
+    }
+
     @Test
     void aBranchCannotBeMergedIntoItself() {
         initialiseMain();

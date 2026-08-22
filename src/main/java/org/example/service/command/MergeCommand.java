@@ -35,7 +35,9 @@ public final class MergeCommand extends Command {
         return switch (result) {
             case MergeResult.AlreadyUpToDate ignored -> print(List.of("Already up to date."));
             case MergeResult.Conflict conflict -> throw new IllegalStateException("Cannot merge '" + otherBranch + "' into '"
-                    + currentBranch + "': conflicting changes to " + String.join("; ", conflict.conflicts()) + ".");
+                    + currentBranch + "': conflicting changes to " + String.join("; ", conflict.conflicts()) + ". "
+                    + "Resolve by adding a compensating DDL statement ('dbgit add' + 'dbgit commit') to '" + currentBranch
+                    + "' or '" + otherBranch + "' that reconciles the conflicting change, then retry 'dbgit merge " + otherBranch + "'.");
             case MergeResult.Success success -> print(List.of(
                     "Merged '" + otherBranch + "' into '" + currentBranch + "' as commit #" + success.commitId()
                             + ", applying " + success.appliedChangesetCount() + " changeset(s).",

@@ -8,7 +8,13 @@ public sealed interface MergeResult {
     record AlreadyUpToDate() implements MergeResult {
     }
 
-    /** The two branches touched the same column incompatibly since they diverged, so the merge was rejected. Each entry describes one conflicting table/column pair. */
+    /**
+     * The two branches touched the same column incompatibly since they diverged, so the merge was rejected. Each
+     * entry describes one conflicting table/column pair. Resolution is manual, the same way {@code dbgit add} stages
+     * any other change: add a compensating DDL statement to either branch that reconciles the conflicting change
+     * (so the two branches' replayed schemas agree again for that column/constraint/index), commit it, and retry
+     * the merge - the conflict check will no longer see a difference to flag.
+     */
     record Conflict(List<String> conflicts) implements MergeResult {
     }
 
