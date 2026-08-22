@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Demo walkthrough of the dbgit workflow. Requires ./dbService to already be running.
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/

@@ -6,7 +6,7 @@
 # statement it should have refused. Nothing here is expected to succeed, so it creates no tables
 # and leaves no schema behind - it is safe to run against a live workspace.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 failures=0
 

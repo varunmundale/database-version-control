@@ -8,7 +8,7 @@
 #   - dbgit merge big (while on num) -> rejected: both sides touched the same column
 #     incompatibly since they diverged. No staging branch or merge commit is created.
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/

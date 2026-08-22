@@ -8,7 +8,7 @@
 #   - dbgit merge notes (while on sku) -> no conflict, since the two branches touched
 #     different columns; sku ends up with both 'sku' and 'notes'.
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/

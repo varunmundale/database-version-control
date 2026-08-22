@@ -7,8 +7,8 @@
 #
 # Requirements: ./dbService running, and Docker available for the shared PostgreSQL container.
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DBGIT="$ROOT/dbgit"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DBGIT="$REPO_ROOT/dbgit"
 RUN_ID="$$"
 WORKDIR="$(mktemp -d)"
 PASSED=0

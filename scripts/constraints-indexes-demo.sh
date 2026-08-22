@@ -11,7 +11,7 @@
 #   - pricing:   forked from mybranch, adds a UNIQUE constraint of the SAME name over a different column
 #   - dbgit diff shows constraints and indexes as their own nodes, and flags the genuine clash
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/
