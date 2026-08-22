@@ -23,11 +23,6 @@ public final class BranchLocks {
         this.timeout = Objects.requireNonNull(timeout, "timeout must not be null");
     }
 
-    /** In-memory locking with a generous timeout - for embedders and tests running a single daemon. */
-    public static BranchLocks inMemory() {
-        return new BranchLocks(new InMemoryBranchLock(), Duration.ofSeconds(60));
-    }
-
     /**
      * @throws LockTimeoutException if any branch stays busy past the timeout; anything already taken is released
      */

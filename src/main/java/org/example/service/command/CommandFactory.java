@@ -21,31 +21,50 @@ public final class CommandFactory {
 
     public Command create(RequestContext request, List<String> arguments) {
         CommandContext context = this.context.forRequest(Objects.requireNonNull(request, "request must not be null"));
-        if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("init")) {
-            return new InitCommand(context);
+        if (arguments.isEmpty() || !arguments.get(0).equals("dbgit")) {
+            throw usage();
         }
-        if (arguments.equals(List.of("dbgit", "branch"))) {
-            return new BranchCommand(context);
-        }
-        if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("checkout")) {
-            return new CheckoutCommand(context, arguments.subList(2, arguments.size()));
-        }
-        if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("commit")) {
-            return new CommitCommand(context, arguments.subList(2, arguments.size()));
-        }
-        if (arguments.equals(List.of("dbgit", "log"))) {
-            return new LogCommand(context);
-        }
-        if (arguments.size() == 3 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("reset")) {
-            return new ResetCommand(context, arguments.get(2));
-        }
-        if (arguments.size() == 4 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("diff")) {
-            return new DiffCommand(context, arguments.get(2), arguments.get(3));
-        }
-        if (arguments.size() == 3 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("merge")) {
-            return new MergeCommand(context, arguments.get(2));
-        }
-        throw new IllegalArgumentException(
+        String verb = arguments.size() >= 2 ? arguments.get(1) : "";
+        return switch (verb) {
+            case "init" -> new InitCommand(context);
+            case "checkout" -> new CheckoutCommand(context, arguments.subList(2, arguments.size()));
+            case "commit" -> new CommitCommand(context, arguments.subList(2, arguments.size()));
+            case "branch" -> {
+                if (arguments.size() != 2) {
+                    throw usage();
+                }
+                yield new BranchCommand(context);
+            }
+            case "log" -> {
+                if (arguments.size() != 2) {
+                    throw usage();
+                }
+                yield new LogCommand(context);
+            }
+            case "reset" -> {
+                if (arguments.size() != 3) {
+                    throw usage();
+                }
+                yield new ResetCommand(context, arguments.get(2));
+            }
+            case "diff" -> {
+                if (arguments.size() != 4) {
+                    throw usage();
+                }
+                yield new DiffCommand(context, arguments.get(2), arguments.get(3));
+            }
+            case "merge" -> {
+                if (arguments.size() != 3) {
+                    throw usage();
+                }
+                yield new MergeCommand(context, arguments.get(2));
+            }
+            default -> throw usage();
+        };
+    }
+
+    private static IllegalArgumentException usage() {
+        return new IllegalArgumentException(
                 "Usage: dbgit init --host <h> [--port 5432] --database <d> --user <u> [--password <w>] "
                         + "| dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add "
                         + "| dbgit commit [-m <message>] [--author <name>] | dbgit log | dbgit reset <commit> "

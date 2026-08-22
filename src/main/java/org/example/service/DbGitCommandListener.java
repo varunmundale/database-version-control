@@ -8,7 +8,6 @@ import org.example.core.locking.AdvisoryBranchLock;
 import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
-import org.example.protocol.RequestHeader;
 import org.example.service.command.AddCommand;
 import org.example.service.command.Command;
 import org.example.service.command.CommandContext;
@@ -29,10 +28,11 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The {@code dbService} daemon: listens on a local TCP socket and runs each incoming command line. Owns the accept
- * loop and the shape of a request - a command line, optionally followed by a body - while the byte-level work of
- * reading and writing belongs to {@link SocketReader} and {@link SocketWriter}, and picking the {@link Command} for
- * a given argument list belongs to {@link CommandFactory}.
+ * The {@code dbService} daemon: listens on a local TCP socket, accepts connections and hands each one to the
+ * bounded pool as a {@link ConnectionHandler}. Owns the accept loop, the pool and construction/wiring of the
+ * command layer; framing a connection's bytes into a request and dispatching it belongs to
+ * {@link ConnectionHandler}, the byte-level work of reading and writing belongs to {@link SocketReader} and
+ * {@link SocketWriter}, and picking the {@link Command} for a given argument list belongs to {@link CommandFactory}.
  *
  * <p>{@link #execute} and {@link #add} are the same entry points the socket path uses, callable directly by anyone
  * embedding the daemon - which is how the command tests drive every {@code dbgit} verb without a client.
@@ -44,8 +44,6 @@ import java.util.concurrent.TimeUnit;
  * not the average one.
  */
 public final class DbGitCommandListener implements Closeable {
-    private static final String ADD_COMMAND = "dbgit add";
-
     private final CommandContext context;
     private final CommandFactory commandFactory;
     private final ServerSocket serverSocket;
@@ -99,7 +97,7 @@ public final class DbGitCommandListener implements Closeable {
                 throw exception;
             }
             // The task owns the socket from here, including closing it - accepting must not outrun handling.
-            handlers.execute(new Handler(socket));
+            handlers.execute(new ConnectionHandler(socket, commandFactory, context, concurrency));
         }
     }
 
@@ -135,86 +133,10 @@ public final class DbGitCommandListener implements Closeable {
         return new AddCommand(context.forRequest(request), ddl).execute();
     }
 
-    /**
-     * A request is a {@link RequestHeader} line, then the command, then - for {@code dbgit add} alone - a body.
-     * The header is mandatory: the branch and the tracked database's credentials both arrive on it, so a request
-     * without one carries too little to act on.
-     */
-    private void handle(Socket socket) throws IOException {
-        // Without this a client that opens a connection and never speaks - or never closes its `dbgit add` body -
-        // holds one of the pool's threads indefinitely.
-        socket.setSoTimeout(concurrency.socketTimeoutMs());
-        try (SocketReader reader = new SocketReader(socket);
-             SocketWriter writer = new SocketWriter(socket)) {
-            String headerLine = reader.nextLine();
-            if (headerLine == null || headerLine.isBlank()) {
-                writer.writeError("No command received.");
-                return;
-            }
-            RequestContext request;
-            try {
-                request = RequestHeader.parse(headerLine);
-            } catch (IllegalArgumentException exception) {
-                writer.writeError(exception.getMessage());
-                return;
-            }
-
-            String commandLine = reader.nextLine();
-            if (commandLine == null || commandLine.isBlank()) {
-                writer.writeError("No command received.");
-                return;
-            }
-            try {
-                writer.writeOk(run(request, commandLine, reader).lines());
-            } catch (RuntimeException exception) {
-                writer.writeError(exception.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Only {@code dbgit add} carries a body - its DDL can span lines, so it arrives after the command line rather
-     * than inside it - so only that branch asks the reader for what is left.
-     */
-    private DbGitCommandResult run(RequestContext request, String commandLine, SocketReader reader) throws IOException {
-        if (commandLine.trim().equals(ADD_COMMAND)) {
-            return add(request, reader.remaining());
-        }
-        return execute(request, commandLine);
-    }
-
     private static Thread handlerThread(Runnable task) {
         Thread thread = new Thread(task, "dbgit-handler");
         thread.setDaemon(true);
         return thread;
-    }
-
-    /** Owns one connection for its whole life, closing it however the command turns out. */
-    private final class Handler implements Runnable {
-        private final Socket socket;
-
-        private Handler(Socket socket) {
-            this.socket = socket;
-        }
-
-        @Override
-        public void run() {
-            try (Socket owned = socket) {
-                handle(owned);
-            } catch (IOException exception) {
-                System.err.println("[dbService] Dropped a connection: " + exception.getMessage());
-            }
-        }
-
-        void reject() {
-            try (Socket owned = socket;
-                 SocketWriter writer = new SocketWriter(owned)) {
-                writer.writeError("Server busy: all " + concurrency.handlerThreads()
-                        + " handlers are in use and the queue is full. Try again shortly.");
-            } catch (IOException ignored) {
-                // The client has gone; nothing left to tell it.
-            }
-        }
     }
 
     /**
@@ -224,7 +146,7 @@ public final class DbGitCommandListener implements Closeable {
     private static final class RespondBusy implements RejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable task, ThreadPoolExecutor executor) {
-            ((Handler) task).reject();
+            ((ConnectionHandler) task).reject();
         }
     }
 }

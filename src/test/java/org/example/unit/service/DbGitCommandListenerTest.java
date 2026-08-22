@@ -29,7 +29,6 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,7 +50,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.BranchLocks;
+import org.example.core.locking.TestBranchLocks;
 import org.example.protocol.RequestContext;
 import org.example.protocol.RequestHeader;
 
@@ -74,7 +73,7 @@ class DbGitCommandListenerTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         listener = new DbGitCommandListener(
                 new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0,
-                ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
+                ConcurrencyConfig.getInstance(), TestBranchLocks.inMemory());
         // main tracks a real database now, so point it at one before any request arrives.
         listener.execute(new RequestContext("tester", branch, tracked), "dbgit init");
         serverThread = new Thread(() -> {
@@ -257,7 +256,7 @@ class DbGitCommandListenerTest {
         };
         DbGitCommandListener owned = new DbGitCommandListener(
                 new Forker(new RecordingRunner(), connectors, new InMemoryMetadataStore()), 0, concurrency,
-                BranchLocks.inMemory());
+                TestBranchLocks.inMemory());
         // Reaches the database only to connect, never to execute, so the gate does not hold up start-up.
         owned.execute(new RequestContext("tester", RequestContext.DEFAULT_BRANCH, tracked), "dbgit init");
         Thread thread = new Thread(() -> {

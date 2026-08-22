@@ -26,9 +26,7 @@ public final class MergeCommand extends Command {
     public DbGitCommandResult execute() {
         String currentBranch = context.branch();
         VersioningService versioningService = context.versioningService();
-        if (!versioningService.branches().contains(otherBranch)) {
-            throw new IllegalArgumentException("Unknown branch: " + otherBranch);
-        }
+        versioningService.requireBranchExists(otherBranch);
         if (otherBranch.equals(currentBranch)) {
             throw new IllegalArgumentException("Cannot merge branch '" + currentBranch + "' into itself.");
         }

@@ -90,13 +90,6 @@ public final class SharedPostgresContainer {
         throw fail("Shared PostgreSQL container did not become ready after " + READY_ATTEMPTS + " attempts.", null);
     }
 
-    private void runChecked(String operation, List<String> command) {
-        CommandResult result = run(command, operation, true);
-        if (!result.succeeded()) {
-            throw fail("Could not " + operation + ". Docker exited with code " + result.exitCode() + ".", null);
-        }
-    }
-
     private CommandResult run(List<String> command, String operation, boolean printFailure) {
         try {
             CommandResult result = commandRunner.run(command);

@@ -27,7 +27,7 @@ import java.util.Set;
  * leaves each pairing to work out what changed inside it.
  */
 public record TableDiff(String tableName, TableModel left, TableModel right, List<ColumnDiff> columnDiffs,
-                        List<ConstraintDiff> constraintDiffs, List<IndexDiff> indexDiffs) {
+                        List<ConstraintDiff> constraintDiffs, List<IndexDiff> indexDiffs) implements Sided<TableModel> {
     public TableDiff {
         Side.of(left, right); // validates at least one side is present
         columnDiffs = List.copyOf(columnDiffs);
@@ -52,11 +52,6 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
                 .stream().map(match -> new IndexDiff(match.id(), match.left(), match.right()))
                 .sorted(Comparator.comparing(IndexDiff::indexName)).toList();
         return new TableDiff(tableName, left, right, columns, constraints, indexes);
-    }
-
-    /** LEFT/RIGHT when the table exists on only one side; CONFLICT when it exists on both, regardless of whether anything inside it differs. */
-    public Side side() {
-        return Side.of(left, right);
     }
 
     public boolean onlyOnLeft() {

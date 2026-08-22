@@ -30,9 +30,7 @@ public final class CheckoutCommand extends Command {
     }
 
     private DbGitCommandResult checkoutExisting(String branch) {
-        if (!context.versioningService().branches().contains(branch)) {
-            throw new IllegalArgumentException("Unknown branch: " + branch);
-        }
+        context.versioningService().requireBranchExists(branch);
         return print(List.of("Switched to branch '" + branch + "'."));
     }
 }

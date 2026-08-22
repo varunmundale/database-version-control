@@ -78,6 +78,13 @@ public interface VersioningService {
     /** What the branch tracks, or empty if it has never been initialised. */
     Optional<TrackedDatabaseConfig> trackedDatabase(String branch);
 
+    /** Rejects a branch name that isn't one of {@link #branches()}, with the message every command reports it as. */
+    default void requireBranchExists(String branch) {
+        if (!branches().contains(branch)) {
+            throw new IllegalArgumentException("Unknown branch: " + branch);
+        }
+    }
+
     /** The branch's committed changesets, walked from the root commit to its current HEAD. */
     default List<ChangeSet> commitHistory(String branch) {
         return commits(branch).stream().flatMap(entry -> entry.changesets().stream()).toList();

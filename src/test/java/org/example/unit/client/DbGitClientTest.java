@@ -4,7 +4,7 @@ package org.example.unit.client;
 import org.example.client.DbGitClient;
 import org.example.core.forker.Forker;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.BranchLocks;
+import org.example.core.locking.TestBranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
@@ -60,7 +60,7 @@ class DbGitClientTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         listener = new DbGitCommandListener(
                 new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0,
-                ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
+                ConcurrencyConfig.getInstance(), TestBranchLocks.inMemory());
         // main tracks a real database now, so point it at one before any request arrives.
         listener.execute(request(), "dbgit init");
         serverThread = new Thread(() -> {

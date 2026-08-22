@@ -5,7 +5,7 @@ import org.example.service.DbGitCommandListener;
 import org.example.service.DbGitCommandResult;
 import org.example.core.forker.Forker;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.BranchLocks;
+import org.example.core.locking.TestBranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
@@ -27,7 +27,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -66,7 +65,7 @@ class DbGitCommandsTest {
     private DaemonSession listener(Forker forker) {
         try {
             DbGitCommandListener listener = new DbGitCommandListener(forker, 0,
-                    ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
+                    ConcurrencyConfig.getInstance(), TestBranchLocks.inMemory());
             listeners.add(listener);
             DaemonSession session = new DaemonSession(listener, "tester");
             // main tracks a real database now, so point it at one before any test touches it.

@@ -30,12 +30,8 @@ public final class DiffCommand extends Command {
     @Override
     public DbGitCommandResult execute() {
         VersioningService versioningService = context.versioningService();
-        if (!versioningService.branches().contains(left)) {
-            throw new IllegalArgumentException("Unknown branch: " + left);
-        }
-        if (!versioningService.branches().contains(right)) {
-            throw new IllegalArgumentException("Unknown branch: " + right);
-        }
+        versioningService.requireBranchExists(left);
+        versioningService.requireBranchExists(right);
 
         List<ChangeSet> leftHistory = versioningService.commitHistory(left);
         List<ChangeSet> rightHistory = versioningService.commitHistory(right);

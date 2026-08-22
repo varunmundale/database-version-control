@@ -7,7 +7,6 @@ import org.example.config.BranchDatabaseConfig;
 import org.example.connectors.ConnectorFactory;
 import org.example.models.versioning.ChangeSet;
 import org.example.repository.BranchDatabaseRepository;
-import org.example.repository.RepositoryException;
 import org.example.core.versioning.MetadataVersioningService;
 import org.example.core.versioning.VersioningService;
 

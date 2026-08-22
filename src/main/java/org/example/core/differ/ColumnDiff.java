@@ -9,13 +9,9 @@ import org.example.models.schema.StableId;
  * a different name on each side. Carries the actual {@link ColumnModel}s rather than a pre-rendered message, so
  * callers decide how (or whether) to display a conflict.
  */
-public record ColumnDiff(StableId id, ColumnModel left, ColumnModel right) {
+public record ColumnDiff(StableId id, ColumnModel left, ColumnModel right) implements Sided<ColumnModel> {
     public ColumnDiff {
         Side.of(left, right); // validates at least one side is present
-    }
-
-    public Side side() {
-        return Side.of(left, right);
     }
 
     /** The name to sort and label this diff by - whichever side has the column. */

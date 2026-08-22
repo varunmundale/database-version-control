@@ -30,7 +30,6 @@ import java.util.Objects;
  * that to rebuild it from dbgit's history would destroy data dbgit never created and cannot replace.
  */
 public final class Resetter {
-    private static final String SCHEMA = "public";
     private static final String DEFAULT_BRANCH = "main";
 
     private final Forker forker;
