@@ -2,7 +2,7 @@ package org.example.core.forker;
 
 import org.example.core.forker.docker.CommandRunner;
 import org.example.core.forker.docker.ProcessCommandRunner;
-import org.example.core.forker.docker.SharedPostgresContainer;
+import org.example.core.forker.docker.SharedContainer;
 import org.example.config.BranchDatabaseConfig;
 import org.example.connectors.ConnectorFactory;
 import org.example.models.versioning.ChangeSet;
@@ -17,13 +17,11 @@ import java.util.regex.Pattern;
 /** Forks a branch's database into one persistent PostgreSQL Docker container, recreating it from the parent's commit history. */
 public final class Forker {
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
-    /** The one dialect {@link SharedPostgresContainer} actually starts anything for. */
-    private static final String POSTGRESQL_DIALECT = "postgresql";
 
-    private final BranchDatabaseConfig config;
+    private final BranchDatabaseConfig config = BranchDatabaseConfig.getInstance();
     private final BranchDatabaseRepository branchDatabases;
     private final VersioningService versioningService;
-    private final SharedPostgresContainer sharedContainer;
+    private final SharedContainer sharedContainer;
 
     public Forker() {
         this(new ProcessCommandRunner(), BranchDatabaseRepository.getInstance(), new MetadataVersioningService());
@@ -31,31 +29,14 @@ public final class Forker {
 
     /** Builds the branch-database repository over a supplied connector, so tests can fork without a real container. */
     public Forker(CommandRunner commandRunner, ConnectorFactory connectorFactory, VersioningService versioningService) {
-        this(commandRunner, BranchDatabaseConfig.getInstance(), connectorFactory, versioningService);
-    }
-
-    /**
-     * As above, but with the config supplied rather than read from {@code dbgit.json}'s classpath singleton - what a
-     * test asserting on {@link SharedPostgresContainer}'s real docker commands (container name, host port, dialect)
-     * uses, so it depends on a config of its own rather than on whatever the shared test {@code dbgit.json} says.
-     */
-    public Forker(CommandRunner commandRunner, BranchDatabaseConfig config, ConnectorFactory connectorFactory,
-                  VersioningService versioningService) {
-        this(commandRunner, config, new BranchDatabaseRepository(config, connectorFactory), versioningService);
+        this(commandRunner, new BranchDatabaseRepository(BranchDatabaseConfig.getInstance(), connectorFactory), versioningService);
     }
 
     public Forker(CommandRunner commandRunner, BranchDatabaseRepository branchDatabases, VersioningService versioningService) {
-        this(commandRunner, BranchDatabaseConfig.getInstance(), branchDatabases, versioningService);
-    }
-
-    /** The designated constructor: every other one funnels through here with whatever config it settled on. */
-    public Forker(CommandRunner commandRunner, BranchDatabaseConfig config, BranchDatabaseRepository branchDatabases,
-                  VersioningService versioningService) {
-        this.config = Objects.requireNonNull(config, "config must not be null");
         this.branchDatabases = Objects.requireNonNull(branchDatabases, "branchDatabases must not be null");
         this.versioningService = Objects.requireNonNull(versioningService, "versioningService must not be null");
-        this.sharedContainer = new SharedPostgresContainer(
-                Objects.requireNonNull(commandRunner, "commandRunner must not be null"), config, this.branchDatabases);
+        this.sharedContainer = new SharedContainer(
+                Objects.requireNonNull(commandRunner, "commandRunner must not be null"), this.branchDatabases);
     }
 
     public VersioningService versioningService() {
@@ -70,15 +51,10 @@ public final class Forker {
     /**
      * Brings the shared scratchpad container up and waits until it answers - the precondition for creating any
      * branch database, whether {@link #fork} is building a new one or {@code dbgit reset} is rebuilding one.
-     *
-     * <p>A no-op for any dialect but {@code postgresql}: an in-memory H2 database needs no server, no container and
-     * no Docker at all, so starting one here would be pure waste - and the shared container this brings up is,
-     * by name and by the docker commands it runs, a PostgreSQL-specific thing regardless of {@code dialect}.
+     * {@link SharedContainer} itself decides whether that means anything for the configured dialect.
      */
     public void ensureBranchDatabasesRunning() {
-        if (config.dialect().equals(POSTGRESQL_DIALECT)) {
-            sharedContainer.ensureRunning();
-        }
+        sharedContainer.ensureRunning();
     }
 
     public ForkResult fork(String fromBranch, String currentBranch) {

@@ -9,11 +9,17 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Ensures the single, persistent PostgreSQL Docker container that every branch's database is forked into is
- * running and ready to accept connections - starting it via the Docker CLI if it isn't, then polling until it
- * accepts a real connection.
+ * Ensures the single, persistent Docker container every branch's database is forked into is running and ready to
+ * accept connections - starting it via the Docker CLI if it isn't, then polling until it accepts a real connection.
+ *
+ * <p>A no-op for any {@code branchDatabases.dialect} but {@code postgresql}: an in-memory H2 database needs no
+ * server, no container and no Docker at all, so starting one would be pure waste. The docker commands themselves
+ * stay Postgres-specific (the image env vars, the container's own port), since {@code postgresql} is the only
+ * dialect that is actually a server process to bring up - the name and the dialect check are what generalized, so
+ * {@link org.example.core.forker.Forker} does not have to know which dialects need a container and which don't.
  */
-public final class SharedPostgresContainer {
+public final class SharedContainer {
+    private static final String POSTGRESQL_DIALECT = "postgresql";
     private static final int CONTAINER_PORT = 5432;
     private static final int READY_ATTEMPTS = 20;
 
@@ -24,24 +30,14 @@ public final class SharedPostgresContainer {
     private final BranchDatabaseConfig config;
     private final BranchDatabaseRepository branchDatabases;
 
-    public SharedPostgresContainer(CommandRunner commandRunner, BranchDatabaseConfig config, BranchDatabaseRepository branchDatabases) {
+    public SharedContainer(CommandRunner commandRunner, BranchDatabaseRepository branchDatabases) {
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
-        this.config = Objects.requireNonNull(config, "config must not be null");
+        this.config = BranchDatabaseConfig.getInstance();
         this.branchDatabases = Objects.requireNonNull(branchDatabases, "branchDatabases must not be null");
     }
 
-    /**
-     * Starts the shared container if it isn't already running, then blocks until it accepts connections.
-     *
-     * <p>Synchronized and remembered. Two threads racing here would both see "not running" and both issue
-     * {@code docker run} with the same {@code --name}, and the loser would fail with a name conflict - aborting an
-     * otherwise healthy fork. Remembering also means the callers that ask twice for one command, or once per
-     * command thereafter, cost a volatile read rather than a subprocess.
-     *
-     * <p>The flag is set only on success, so a failed start is retried by the next caller.
-     */
     public void ensureRunning() {
-        if (ready) {
+        if (!config.dialect().equals(POSTGRESQL_DIALECT) || ready) {
             return;
         }
         synchronized (this) {
@@ -120,12 +116,12 @@ public final class SharedPostgresContainer {
     }
 
     private static void out(String message) {
-        System.out.println("[SharedPostgresContainer] " + message);
+        System.out.println("[SharedContainer] " + message);
         System.out.flush();
     }
 
     private static void err(String message) {
-        System.err.println("[SharedPostgresContainer] " + message);
+        System.err.println("[SharedContainer] " + message);
         System.err.flush();
     }
 }
