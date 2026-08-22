@@ -27,6 +27,16 @@ public final class BranchDatabaseConfig {
         return INSTANCE;
     }
 
+    /**
+     * Builds a config directly rather than reading {@code dbgit.json} - for a test that wants to assert against a
+     * config of its own (e.g. {@code Forker}'s real shared-container docker commands) without depending on, or
+     * being able to break, whatever the classpath's {@code dbgit.json} happens to say.
+     */
+    public static BranchDatabaseConfig of(String containerName, String image, String user, String password,
+                                           String adminDatabase, int hostPort, String dialect) {
+        return new BranchDatabaseConfig(containerName, image, user, password, adminDatabase, hostPort, dialect);
+    }
+
     public String containerName() {
         return containerName;
     }

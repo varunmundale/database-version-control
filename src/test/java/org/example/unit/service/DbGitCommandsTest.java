@@ -4,6 +4,7 @@ package org.example.unit.service;
 import org.example.service.DbGitCommandListener;
 import org.example.service.DbGitCommandResult;
 import org.example.core.forker.Forker;
+import org.example.config.BranchDatabaseConfig;
 import org.example.config.ConcurrencyConfig;
 import org.example.core.locking.TestBranchLocks;
 import org.example.core.forker.docker.CommandResult;
@@ -56,6 +57,15 @@ class DbGitCommandsTest {
 
     private static final String MAIN_DATABASE = "app";
 
+    /**
+     * A real, Postgres-flavored config owned by the two tests below that assert on {@code SharedPostgresContainer}'s
+     * docker-command count - so they depend on a config of their own, not on whatever the shared test
+     * {@code dbgit.json}'s {@code branchDatabases} section says (free to describe H2 instead, since nothing here
+     * depends on it any more).
+     */
+    private static final BranchDatabaseConfig POSTGRES_CONFIG = BranchDatabaseConfig.of(
+            "postgres-branches-scratchpad", "postgres:16-alpine", "postgres", "postgres", "postgres", 55432, "postgresql");
+
     private final List<DbGitCommandListener> listeners = new ArrayList<>();
 
     /**
@@ -87,7 +97,7 @@ class DbGitCommandsTest {
     void createsABranchDatabaseAndWritesLocalDbGitState() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DaemonSession dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, POSTGRES_CONFIG, new NoOpConnectorFactory(), metadataStore));
 
         DbGitCommandResult result = dbgit.execute("dbgit checkout -b feature/orders");
 
@@ -101,7 +111,7 @@ class DbGitCommandsTest {
     @Test
     void checksOutExistingBranchesAndListsAllBranches() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DaemonSession dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(runner, POSTGRES_CONFIG, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
         dbgit.execute("dbgit checkout -b feature/orders");
 
         DbGitCommandResult checkout = dbgit.execute("dbgit checkout main");
@@ -475,7 +485,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
-        DaemonSession dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, POSTGRES_CONFIG, connectorFactory, metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m first table");
         dbgit.execute("dbgit checkout -b feature/orders");

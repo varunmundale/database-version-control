@@ -7,6 +7,7 @@ import org.example.core.forker.ForkResult;
 import org.example.core.forker.Forker;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
+import org.example.config.BranchDatabaseConfig;
 import org.example.config.ConnectionSettings;
 import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
@@ -37,13 +38,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ForkerTest {
+    /**
+     * A real, Postgres-flavored config this test file owns outright, rather than reading
+     * {@code BranchDatabaseConfig.getInstance()} - the classpath singleton other tests (and production) share. This
+     * class is specifically about {@code SharedPostgresContainer}'s real docker commands, so it needs a config it
+     * controls, not one whatever the shared test {@code dbgit.json} happens to say (which is free to describe H2
+     * instead, since nothing here depends on it any more).
+     */
+    private static final BranchDatabaseConfig CONFIG = BranchDatabaseConfig.of(
+            "postgres-branches-scratchpad", "postgres:16-alpine", "postgres", "postgres", "postgres", 55432, "postgresql");
+
     @Test
     void startsSharedPostgresCreatesTheBranchDatabaseAndPrintsStatus() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(1, "No such container"), new CommandResult(0, "container-id"));
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         FakeMetadataStore metadataStore = new FakeMetadataStore();
         metadataStore.seedBranch("main");
-        Forker forker = new Forker(runner, connectorFactory, metadataStore);
+        Forker forker = new Forker(runner, CONFIG, connectorFactory, metadataStore);
 
         ForkResult result = forker.fork("main", "feature/orders");
 
@@ -65,7 +76,7 @@ class ForkerTest {
     @Test
     void surfacesDockerFailures() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(1, "No such container"), new CommandResult(125, "docker daemon is unavailable"));
-        Forker forker = new Forker(runner, new RecordingConnectorFactory(), new FakeMetadataStore());
+        Forker forker = new Forker(runner, CONFIG, new RecordingConnectorFactory(), new FakeMetadataStore());
 
         ForkException exception = assertThrows(ForkException.class, () -> forker.fork("main", "feature/orders"));
 
@@ -78,7 +89,7 @@ class ForkerTest {
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         FakeMetadataStore metadataStore = new FakeMetadataStore();
         metadataStore.seedBranch("main");
-        Forker forker = new Forker(runner, connectorFactory, metadataStore);
+        Forker forker = new Forker(runner, CONFIG, connectorFactory, metadataStore);
 
         ForkResult result = forker.fork("main", "feature/payments");
 
@@ -98,7 +109,7 @@ class ForkerTest {
         metadataStore.seedCommitHistory("main",
                 "CREATE TABLE orders (id INT PRIMARY KEY);",
                 "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
-        Forker forker = new Forker(runner, connectorFactory, metadataStore);
+        Forker forker = new Forker(runner, CONFIG, connectorFactory, metadataStore);
 
         ForkResult result = forker.fork("main", "feature/orders");
 
@@ -121,7 +132,7 @@ class ForkerTest {
         FakeMetadataStore metadataStore = new FakeMetadataStore();
         metadataStore.seedBranch("main");
         metadataStore.seedBranch("feature/orders");
-        Forker forker = new Forker(runner, new RecordingConnectorFactory(), metadataStore);
+        Forker forker = new Forker(runner, CONFIG, new RecordingConnectorFactory(), metadataStore);
 
         ForkException exception = assertThrows(ForkException.class, () -> forker.fork("main", "feature/orders"));
 

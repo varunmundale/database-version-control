@@ -1,6 +1,7 @@
 {
   "//": "The test classpath's dbgit.json, which shadows src/main/resources' for the whole test run.",
-  "//metadata": "The only section that differs: the integration tests bind a throwaway PostgreSQL container to this port, so nothing here touches the developer's own metadata server on 5432. It is fixed rather than ephemeral because the config is read once, statically, before any container can start - so the container follows the config, not the other way round.",
+  "//metadata": "The integration tests bind a throwaway PostgreSQL container to this port, so nothing here touches the developer's own metadata server on 5432. It is fixed rather than ephemeral because the config is read once, statically, before any container can start - so the container follows the config, not the other way round.",
+  "//branchDatabases": "Genuinely H2 now, and read for real: DbGitIntegrationTest builds its BranchDatabaseRepository straight off ConnectorRegistry.builtins().get(\"h2\") rather than this dialect field, but adminDatabase here is still the literal H2 database name Forker.ensureBranchDatabasesRunning/BranchDatabaseRepository open as their 'admin' connection whenever something does read this section's config.connectionTo(...) - see BranchDatabaseConfig. ForkerTest and DbGitCommandsTest used to depend on this section describing a real Postgres container (containerName, hostPort, dialect all asserted on directly); they no longer do, since Forker now takes an explicit BranchDatabaseConfig (BranchDatabaseConfig.of(...)) and those two test files build their own Postgres-flavored one rather than reading BranchDatabaseConfig.getInstance() - see ForkerTest.CONFIG / DbGitCommandsTest.POSTGRES_CONFIG. containerName/image/user/password are otherwise unused: no container ever starts for dialect 'h2', and H2Connections ignores credentials entirely (see its own javadoc for why). BranchDatabaseRepositoryH2Test covers the h2 dialect directly against ConnectorRegistry, independent of whatever this file says.",
 
   "service": {
     "port": 47615
@@ -21,12 +22,12 @@
     "lockTimeoutMs": 60000
   },
   "branchDatabases": {
-    "containerName": "postgres-branches-scratchpad",
-    "image": "postgres:16-alpine",
-    "user": "postgres",
-    "password": "postgres",
-    "adminDatabase": "postgres",
-    "hostPort": 55432,
-    "dialect": "postgresql"
+    "containerName": "h2-branches-scratchpad",
+    "image": "unused",
+    "user": "unused",
+    "password": "unused",
+    "adminDatabase": "admin",
+    "hostPort": 0,
+    "dialect": "h2"
   }
 }

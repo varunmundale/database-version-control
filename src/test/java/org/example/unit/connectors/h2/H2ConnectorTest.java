@@ -2,6 +2,7 @@ package org.example.unit.connectors.h2;
 
 
 import org.example.connectors.h2.H2Connector;
+import org.example.repository.BranchDatabaseRepository;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
@@ -65,6 +66,42 @@ class H2ConnectorTest {
 
             assertTrue(database.execute("SELECT id FROM people").rows().isEmpty(),
                     "the insert before the failure should have been rolled back");
+        }
+    }
+
+    /**
+     * H2 has no {@code CREATE DATABASE} statement of its own; {@link BranchDatabaseRepository#createDatabase} sends
+     * it anyway, since it is written once against whatever dialect is configured. The connector translates it into
+     * emptying the named database rather than letting H2 reject it - so this is a genuine, in-process alternative to
+     * a real branch-forked Postgres database, not just a test double.
+     */
+    @Test
+    void executingCreateDatabaseEmptiesTheNamedDatabaseInsteadOfBeingSentToH2Literally() throws SQLException {
+        try (H2Connector admin = H2Connector.inMemory("connector_test_create_admin")) {
+            var result = admin.execute("CREATE DATABASE \"connector_test_forked\"");
+            assertFalse(result.hasResultSet());
+        }
+
+        try (H2Connector forked = H2Connector.inMemory("connector_test_forked")) {
+            assertTrue(forked.execute(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC'").rows().isEmpty());
+        }
+    }
+
+    /** Mirrors {@code DROP DATABASE IF EXISTS "..."}, what {@code dbgit reset} sends before replaying a branch's history. */
+    @Test
+    void executingDropDatabaseEmptiesAPreviouslyPopulatedDatabase() throws SQLException {
+        try (H2Connector forked = H2Connector.inMemory("connector_test_to_drop")) {
+            forked.execute("CREATE TABLE leftovers (id INT)");
+        }
+
+        try (H2Connector admin = H2Connector.inMemory("connector_test_drop_admin")) {
+            admin.execute("DROP DATABASE IF EXISTS \"connector_test_to_drop\"");
+        }
+
+        try (H2Connector reopened = H2Connector.inMemory("connector_test_to_drop")) {
+            assertTrue(reopened.execute(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC'").rows().isEmpty());
         }
     }
 

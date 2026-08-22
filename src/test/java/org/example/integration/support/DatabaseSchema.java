@@ -1,5 +1,8 @@
 package org.example.integration.support;
 
+import org.example.config.ConnectionSettings;
+import org.example.connectors.h2.H2Connections;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -7,26 +10,24 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 
 /**
  * What a branch's database actually looks like, read back out of it.
  *
  * <p>This is the half of an integration test the unit tests cannot reach. dbgit never introspects a database - it
  * writes DDL into one and replays history into another - so the only way to show that a fork, a merge or a reset
- * put the schema it claimed into the schema it built is to go and look. Everything here reads
+ * put the schema it claimed into the database it built is to go and look. Everything here reads
  * {@code INFORMATION_SCHEMA} directly, deliberately bypassing dbgit's own model.
+ *
+ * <p>Connects through the real {@link H2Connections}, the same connector production code opens branch databases
+ * through - not a test double. No bookkeeping of its own is needed here: every database this reads was already
+ * created (and, on a fresh fork or reset, already emptied) by {@code BranchDatabaseRepository} before this ever
+ * looks at it.
  *
  * <p>H2 folds unquoted identifiers to upper case; every name is handed back lower-cased, so assertions read the
  * way the DDL that created them was written.
  */
 public final class DatabaseSchema {
-    private final H2Databases databases;
-
-    public DatabaseSchema(H2Databases databases) {
-        this.databases = Objects.requireNonNull(databases, "databases must not be null");
-    }
-
     public List<String> tables(String database) {
         return query(database, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES"
                 + " WHERE TABLE_SCHEMA = 'PUBLIC' ORDER BY TABLE_NAME");
@@ -61,7 +62,8 @@ public final class DatabaseSchema {
     }
 
     private List<String> query(String database, String sql, String... arguments) {
-        try (Connection connection = databases.open(database);
+        ConnectionSettings settings = new ConnectionSettings("localhost", 0, "", "", database);
+        try (Connection connection = H2Connections.INSTANCE.open(settings);
              PreparedStatement statement = connection.prepareStatement(sql)) {
             for (int index = 0; index < arguments.length; index++) {
                 statement.setString(index + 1, arguments[index].toUpperCase(Locale.ROOT));

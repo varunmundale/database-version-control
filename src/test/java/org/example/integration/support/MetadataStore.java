@@ -19,7 +19,8 @@ import java.util.List;
  * <p>PostgreSQL rather than H2 because this half of dbgit is PostgreSQL by definition - {@code MetadataDatabase}
  * fixes jOOQ to the Postgres dialect, {@code metadata-schema.sql} is Postgres DDL down to {@code BIGSERIAL} and
  * {@code TIMESTAMPTZ}, and {@code AdvisoryBranchLock} serializes branches through {@code pg_try_advisory_lock}.
- * The branch databases are the half that can be swapped for H2 - see {@link H2Databases}.
+ * The branch databases are the half that can be swapped for H2 - see {@code ConnectorRegistry.builtins().get("h2")}
+ * in {@link DbGitIntegrationTest}, and {@link org.example.connectors.h2.H2Connector} for what makes it real.
  *
  * <p>The container binds a <em>fixed</em> host port, the one the test classpath's {@code dbgit.json} names.
  * {@link MetadataStoreConfig} is a static singleton read once, long before any container could start, so the

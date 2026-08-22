@@ -2,6 +2,7 @@ package org.example.integration.support;
 
 import org.example.config.BranchDatabaseConfig;
 import org.example.config.ConcurrencyConfig;
+import org.example.connectors.spi.ConnectorRegistry;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.forker.docker.CommandResult;
@@ -34,9 +35,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * service is the real {@link MetadataVersioningService} over real jOOQ against real PostgreSQL; branches really are
  * serialized through PostgreSQL advisory locks; DDL really runs against a database engine, and a fork really
  * replays a history into a new one. Only two things are stood in for, and for reasons that are not about the code
- * under test: the branch databases are H2 rather than one PostgreSQL container per branch
- * (see {@link H2Databases}), and the {@code docker} CLI is answered by a stub, since with H2 there is no container
- * to bring up.
+ * under test: the branch databases are H2 rather than one PostgreSQL container per branch - via
+ * {@code ConnectorRegistry.builtins().get("h2")}, the exact lookup {@code BranchDatabaseRepository.getInstance()}
+ * would do in production for {@code branchDatabases.dialect: "h2"} - and the {@code docker} CLI is answered by a
+ * stub, since with H2 there is no container to bring up.
  *
  * <p>Each test gets an empty metadata store and empty branch databases, so commit and changeset numbering starts
  * at 1 every time and a test can say {@code commit #1} rather than counting what ran before it.
@@ -46,9 +48,10 @@ public abstract class DbGitIntegrationTest {
     protected static final String TRACKED_DATABASE = "app";
 
     /** Shared for the JVM's lifetime, because the singletons the daemon reaches them through can only be built once. */
-    private static final H2Databases DATABASES = new H2Databases();
+    private static final BranchDatabaseRepository BRANCH_DATABASES =
+            new BranchDatabaseRepository(BranchDatabaseConfig.getInstance(), ConnectorRegistry.builtins().get("h2"));
 
-    protected final DatabaseSchema schema = new DatabaseSchema(DATABASES);
+    protected final DatabaseSchema schema = new DatabaseSchema();
 
     protected DbGitCli cli;
 
@@ -67,7 +70,11 @@ public abstract class DbGitIntegrationTest {
     @BeforeEach
     void startDaemon() throws IOException {
         MetadataStore.reset();
-        DATABASES.reset();
+        // Every other branch's database is emptied for free, by createDatabase()/dropDatabase()'s own H2
+        // translation, the moment a test forks or resets it. main's tracked database is the one exception - nothing
+        // ever creates or drops it, since dbgit add on main writes to it directly - so it is the one thing here that
+        // has to be emptied explicitly between tests, reusing the same production dropDatabase() everything else does.
+        BRANCH_DATABASES.dropDatabase(TRACKED_DATABASE);
 
         daemon = new DbGitCommandListener(forker(), 0, ConcurrencyConfig.getInstance(), locks());
         Thread accepting = new Thread(this::serve, "dbgit-integration-daemon");
@@ -127,9 +134,7 @@ public abstract class DbGitIntegrationTest {
     }
 
     private static Forker forker() {
-        return new Forker(new NoDocker(),
-                new BranchDatabaseRepository(BranchDatabaseConfig.getInstance(), DATABASES),
-                new MetadataVersioningService());
+        return new Forker(new NoDocker(), BRANCH_DATABASES, new MetadataVersioningService());
     }
 
     /**
