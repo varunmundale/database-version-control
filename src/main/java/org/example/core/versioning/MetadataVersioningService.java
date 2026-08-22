@@ -1,6 +1,9 @@
 package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.Commit;
+import org.example.models.versioning.CommitEntry;
+import org.example.models.versioning.CommitMetadata;
 import org.example.models.versioning.CommitParents;
 import org.example.config.ConnectionSettings;
 import org.example.config.TrackedDatabaseConfig;
@@ -76,32 +79,33 @@ public final class MetadataVersioningService implements VersioningService {
     }
 
     @Override
-    public List<ChangeSet> commitHistory(String branch) {
+    public List<CommitEntry> commits(String branch) {
         return database.query(() -> {
             Long headCommitId = branchRepository.findHeadCommitId(branch);
             if (headCommitId == null) {
-                return List.of();
+                return List.<CommitEntry>of();
             }
 
-            List<Long> order = ancestryOrder(headCommitId, commitRepository.findAllParents());
+            Map<Long, Commit> commitsById = commitRepository.findAll();
+            List<Long> order = ancestryOrder(headCommitId, commitsById);
             Map<Long, List<ChangeSet>> byCommit = changesetRepository.findGroupedByCommitId(order);
 
-            List<ChangeSet> history = new ArrayList<>();
+            List<CommitEntry> entries = new ArrayList<>();
             for (Long commitId : order) {
-                history.addAll(byCommit.getOrDefault(commitId, List.of()));
+                entries.add(new CommitEntry(commitsById.get(commitId), byCommit.getOrDefault(commitId, List.of())));
             }
-            return history;
+            return entries;
         });
     }
 
     @Override
-    public long commit(String branch, List<Long> changesetIds) {
+    public long commit(String branch, List<Long> changesetIds, CommitMetadata metadata) {
         if (changesetIds.isEmpty()) {
             throw new VersioningException("No applied changesets to commit for branch '" + branch + "'.");
         }
         return database.transaction("Could not commit branch '" + branch + "'", () -> {
             Long headCommitId = branchRepository.findHeadCommitId(branch);
-            long commitId = commitRepository.insert(headCommitId, null);
+            long commitId = commitRepository.insert(headCommitId, null, metadata);
             if (headCommitId != null) {
                 commitRepository.updateNextCommitId(headCommitId, commitId);
             }
@@ -112,14 +116,14 @@ public final class MetadataVersioningService implements VersioningService {
     }
 
     @Override
-    public long createMergeCommit(String branch, String otherBranch) {
+    public long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata) {
         return database.transaction("Could not create merge commit for branch '" + branch + "'", () -> {
             Long firstParent = branchRepository.findHeadCommitId(branch);
             Long secondParent = branchRepository.findHeadCommitId(otherBranch);
             if (secondParent == null) {
                 throw new VersioningException("Branch '" + otherBranch + "' has no commits to merge.");
             }
-            long commitId = commitRepository.insert(firstParent, secondParent);
+            long commitId = commitRepository.insert(firstParent, secondParent, metadata);
             if (firstParent != null) {
                 commitRepository.updateNextCommitId(firstParent, commitId);
             }
@@ -129,9 +133,29 @@ public final class MetadataVersioningService implements VersioningService {
         });
     }
 
-    private static List<Long> ancestryOrder(long headCommitId, Map<Long, CommitParents> parentsById) {
+    /**
+     * Both halves move together or not at all: a branch whose HEAD moved back but whose working set survived would
+     * replay changesets belonging to a schema it no longer has.
+     */
+    @Override
+    public int resetTo(String branch, long commitId) {
+        return database.transaction("Could not reset branch '" + branch + "'", () -> {
+            Long headCommitId = branchRepository.findHeadCommitId(branch);
+            if (headCommitId == null) {
+                throw new VersioningException("Branch '" + branch + "' has no commits to reset to.");
+            }
+            if (!ancestryOrder(headCommitId, commitRepository.findAll()).contains(commitId)) {
+                throw new VersioningException(
+                        "Commit #" + commitId + " is not in branch '" + branch + "' history.");
+            }
+            branchRepository.updateHeadCommitId(branch, commitId);
+            return changesetRepository.deleteUncommitted(branch);
+        });
+    }
+
+    private static List<Long> ancestryOrder(long headCommitId, Map<Long, Commit> commitsById) {
         List<Long> order = new ArrayList<>();
-        collectAncestryOrder(headCommitId, parentsById, new LinkedHashSet<>(), order);
+        collectAncestryOrder(headCommitId, commitsById, new LinkedHashSet<>(), order);
         return order;
     }
 
@@ -142,13 +166,13 @@ public final class MetadataVersioningService implements VersioningService {
      * on top of the first's. A commit already {@code seen} (a common ancestor reached through both parents) is not
      * revisited, so it stays at its original position instead of being duplicated.
      */
-    private static void collectAncestryOrder(Long commitId, Map<Long, CommitParents> parentsById, Set<Long> seen, List<Long> order) {
+    private static void collectAncestryOrder(Long commitId, Map<Long, Commit> commitsById, Set<Long> seen, List<Long> order) {
         if (commitId == null || seen.contains(commitId)) {
             return;
         }
-        CommitParents parents = parentsById.get(commitId);
-        collectAncestryOrder(parents.parentCommitId(), parentsById, seen, order);
-        collectAncestryOrder(parents.secondParentCommitId(), parentsById, seen, order);
+        CommitParents parents = commitsById.get(commitId).parents();
+        collectAncestryOrder(parents.parentCommitId(), commitsById, seen, order);
+        collectAncestryOrder(parents.secondParentCommitId(), commitsById, seen, order);
         if (seen.add(commitId)) {
             order.add(commitId);
         }

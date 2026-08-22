@@ -68,6 +68,8 @@ class BranchDatabaseRepositoryTest {
         assertEquals(List.of("feature_orders_postgres | CREATE TABLE orders (id INT);",
                 "feature_orders_postgres | ALTER TABLE orders ADD COLUMN total INT;"), connectorFactory.executed);
         assertEquals(1, connectorFactory.connections.size(), "the whole replay should reuse one connection");
+        assertEquals(1, connectorFactory.transactions, "the whole replay should be one transaction");
+        assertTrue(connectorFactory.committed);
     }
 
     @Test
@@ -82,6 +84,21 @@ class BranchDatabaseRepositoryTest {
 
         assertTrue(exception.getMessage().contains("changeset #2"), exception.getMessage());
         assertTrue(exception.getMessage().contains("feature_orders_postgres"), exception.getMessage());
+    }
+
+    /** A half-replayed branch database is a schema no history describes, so the whole replay goes back. */
+    @Test
+    void aFailedReplayRollsBackTheStatementsThatAlreadySucceeded() {
+        RecordingConnectorFactory connectorFactory =
+                new RecordingConnectorFactory("ALTER TABLE orders ADD COLUMN total INT;");
+        BranchDatabaseRepository repository = new BranchDatabaseRepository(CONFIG, connectorFactory);
+
+        assertThrows(RepositoryException.class, () -> repository.replay("feature_orders_postgres", List.of(
+                changeset(1, "CREATE TABLE orders (id INT);"),
+                changeset(2, "ALTER TABLE orders ADD COLUMN total INT;"))));
+
+        assertTrue(connectorFactory.rolledBack);
+        assertFalse(connectorFactory.committed);
     }
 
     @Test
@@ -102,6 +119,9 @@ class BranchDatabaseRepositoryTest {
         private final List<String> connections = new ArrayList<>();
         private final List<String> executed = new ArrayList<>();
         private final String failingStatement;
+        private int transactions;
+        private boolean committed;
+        private boolean rolledBack;
 
         private RecordingConnectorFactory() {
             this(null);
@@ -124,9 +144,18 @@ class BranchDatabaseRepositoryTest {
                     return new SqlExecutionResult(false, 0, List.of());
                 }
 
+                /** Stands in for what {@code JdbcConnector} does with a real connection, so a replay's outcome is observable. */
                 @Override
                 public <T> T transaction(SqlTransaction<T> work) throws SQLException {
-                    return work.execute(this);
+                    transactions++;
+                    try {
+                        T result = work.execute(this);
+                        committed = true;
+                        return result;
+                    } catch (SQLException | RuntimeException exception) {
+                        rolledBack = true;
+                        throw exception;
+                    }
                 }
 
                 @Override

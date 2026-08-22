@@ -1,5 +1,7 @@
 package org.example.repository;
 
+import org.example.models.versioning.Commit;
+import org.example.models.versioning.CommitMetadata;
 import org.example.models.versioning.CommitParents;
 import org.jooq.DSLContext;
 import org.jooq.Field;
@@ -8,6 +10,7 @@ import org.jooq.Table;
 import org.jooq.impl.DSL;
 import org.jooq.impl.SQLDataType;
 
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -20,6 +23,9 @@ public final class CommitRepository {
     private static final Field<Long> PARENT_COMMIT_ID = DSL.field("parent_commit_id", SQLDataType.BIGINT);
     private static final Field<Long> SECOND_PARENT_COMMIT_ID = DSL.field("second_parent_commit_id", SQLDataType.BIGINT);
     private static final Field<Long> NEXT_COMMIT_ID = DSL.field("next_commit_id", SQLDataType.BIGINT);
+    private static final Field<String> AUTHOR = DSL.field("author", SQLDataType.CLOB);
+    private static final Field<String> MESSAGE = DSL.field("message", SQLDataType.CLOB);
+    private static final Field<OffsetDateTime> CREATED_AT = DSL.field("created_at", SQLDataType.TIMESTAMPWITHTIMEZONE);
 
     private CommitRepository() {
     }
@@ -29,9 +35,9 @@ public final class CommitRepository {
     }
 
     /** Inserts a commit with the given parent(s) - {@code secondParentCommitId} non-null only for a merge commit - and returns its generated id. */
-    public long insert(Long parentCommitId, Long secondParentCommitId) {
-        return dsl().insertInto(TABLE, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID)
-                .values(parentCommitId, secondParentCommitId)
+    public long insert(Long parentCommitId, Long secondParentCommitId, CommitMetadata metadata) {
+        return dsl().insertInto(TABLE, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE)
+                .values(parentCommitId, secondParentCommitId, metadata.author(), metadata.message())
                 .returning(ID)
                 .fetchOne(ID);
     }
@@ -40,12 +46,19 @@ public final class CommitRepository {
         dsl().update(TABLE).set(NEXT_COMMIT_ID, nextCommitId).where(ID.eq(commitId)).execute();
     }
 
-    /** Every commit's parents, keyed by id - the raw material a branch's history is walked out of. */
-    public Map<Long, CommitParents> findAllParents() {
-        Map<Long, CommitParents> parents = new HashMap<>();
-        dsl().select(ID, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID).from(TABLE)
-                .forEach(row -> parents.put(row.value1(), new CommitParents(row.value2(), row.value3())));
-        return parents;
+    /** Every commit, keyed by id - the raw material a branch's history is walked out of, and what {@code dbgit log} reads. */
+    public Map<Long, Commit> findAll() {
+        Map<Long, Commit> commits = new HashMap<>();
+        dsl().select(ID, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE, CREATED_AT).from(TABLE)
+                .forEach(row -> commits.put(row.get(ID), toCommit(row)));
+        return commits;
+    }
+
+    private static Commit toCommit(Record row) {
+        return new Commit(row.get(ID),
+                new CommitMetadata(row.get(AUTHOR), row.get(MESSAGE)),
+                row.get(CREATED_AT).toInstant(),
+                new CommitParents(row.get(PARENT_COMMIT_ID), row.get(SECOND_PARENT_COMMIT_ID)));
     }
 
     private static DSLContext dsl() {

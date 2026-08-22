@@ -11,6 +11,10 @@ import org.example.connectors.SqlTransaction;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
+import org.example.models.versioning.Commit;
+import org.example.models.versioning.CommitEntry;
+import org.example.models.versioning.CommitMetadata;
+import org.example.models.versioning.CommitParents;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -370,6 +374,178 @@ class DbGitCommandsTest {
         assertEquals(mainHistory, featureHistory);
     }
 
+    @Test
+    void logShowsEachCommitsIdAuthorDateMessageAndChangesetsNewestFirst() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+        dbgit.execute("dbgit commit -m create the orders table --author ada");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
+        dbgit.execute("dbgit commit -m add a total column --author grace");
+
+        List<String> lines = dbgit.execute("dbgit log").lines();
+
+        assertEquals("Branch 'main'", lines.getFirst());
+        assertTrue(lines.contains("Working set: clean."), lines.toString());
+        // Newest commit first, each entry carrying who wrote it, why, and what it folded in.
+        int second = lines.indexOf("commit #2");
+        int first = lines.indexOf("commit #1");
+        assertTrue(second > 0 && first > second, "newest commit should come first: " + lines);
+        assertEquals(List.of(
+                "commit #2",
+                "Author:     grace",
+                "Message:    add a total column",
+                "Changesets:",
+                "  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);"),
+                withoutDates(lines.subList(second, first)));
+        assertEquals(List.of(
+                "commit #1",
+                "Author:     ada",
+                "Message:    create the orders table",
+                "Changesets:",
+                "  #1 CREATE TABLE orders (id INT NOT NULL);"),
+                withoutDates(lines.subList(first, lines.size())));
+    }
+
+    @Test
+    void logListsUncommittedChangesetsAsTheWorkingSetAboveTheCommits() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+        dbgit.execute("dbgit commit -m first");
+        dbgit.add("ALTER TABLE orders ADD COLUMN note TEXT;");
+
+        List<String> lines = dbgit.execute("dbgit log").lines();
+
+        assertEquals(List.of(
+                "Working set (1 uncommitted changeset(s)):",
+                "  #2 [APPLIED] ALTER TABLE orders ADD COLUMN note TEXT;"),
+                lines.subList(2, 4));
+        assertTrue(lines.indexOf("commit #1") > 3, lines.toString());
+    }
+
+    @Test
+    void logCollapsesMultiLineDdlAndSaysSoWhenABranchHasNoCommits() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+
+        assertEquals(List.of("Branch 'main'", "", "Working set: clean.", "No commits on branch 'main' yet."),
+                dbgit.execute("dbgit log").lines());
+
+        dbgit.add("CREATE TABLE orders (\n  id INT NOT NULL,\n  name TEXT\n);");
+
+        // Stored exactly as written, newlines included - but a log is read line by line.
+        assertTrue(dbgit.execute("dbgit log").lines()
+                .contains("  #1 [APPLIED] CREATE TABLE orders ( id INT NOT NULL, name TEXT );"));
+    }
+
+    @Test
+    void commitDefaultsTheAuthorToWhoeverTheDaemonRunsAsAndAcceptsAnEmptyMessage() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+
+        dbgit.execute("dbgit commit");
+
+        List<String> lines = dbgit.execute("dbgit log").lines();
+        assertTrue(lines.contains("Author:     " + System.getProperty("user.name")), lines.toString());
+        assertTrue(lines.contains("Message:    (none)"), lines.toString());
+    }
+
+    @Test
+    void resetRewindsABranchDroppingItsWorkingSetAndRebuildingItsDatabaseFromTheTruncatedHistory() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
+        DbGitCommandListener dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+        dbgit.execute("dbgit commit -m first table");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
+        dbgit.execute("dbgit commit -m add total");
+        dbgit.add("ALTER TABLE orders ADD COLUMN note TEXT;");
+
+        DbGitCommandResult result = dbgit.execute("dbgit reset #1");
+
+        assertEquals(List.of(
+                "Branch 'feature/orders' reset to commit #1.",
+                "Dropped 1 working changeset(s); replayed 1 committed changeset(s) into a rebuilt database.",
+                "Schema now has 1 table(s)."), result.lines());
+
+        // History truncated at the target commit, working set gone entirely.
+        assertEquals(List.of("CREATE TABLE orders (id INT NOT NULL);"),
+                metadataStore.commitHistory("feature/orders").stream().map(ChangeSet::ddl).toList());
+        assertTrue(metadataStore.workingSet("feature/orders").isEmpty());
+
+        // The branch database was dropped, recreated and replayed into - not patched.
+        List<String> againstBranch = connectorFactory.executed.stream()
+                .filter(pair -> pair[0].equals("feature_orders_postgres")).map(pair -> pair[1]).toList();
+        assertTrue(againstBranch.contains("CREATE TABLE orders (id INT NOT NULL);"), againstBranch.toString());
+        List<String> againstAdmin = connectorFactory.executed.stream()
+                .filter(pair -> pair[0].equals("postgres")).map(pair -> pair[1]).toList();
+        assertTrue(againstAdmin.contains("DROP DATABASE IF EXISTS \"feature_orders_postgres\""), againstAdmin.toString());
+        assertTrue(againstAdmin.contains("CREATE DATABASE \"feature_orders_postgres\""), againstAdmin.toString());
+    }
+
+    @Test
+    void resetLeavesTheOtherBranchesSharingThoseCommitsAlone() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+        dbgit.execute("dbgit commit -m first table");
+        dbgit.execute("dbgit checkout -b feature/orders");
+        dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
+        dbgit.execute("dbgit commit -m add total");
+
+        dbgit.execute("dbgit reset 1");
+
+        assertEquals(1, metadataStore.commitHistory("feature/orders").size());
+        assertEquals(1, metadataStore.commitHistory("main").size());
+    }
+
+    @Test
+    void resetRefusesMainBecauseItTracksARealDatabase() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> dbgit.execute("dbgit reset 1"));
+
+        assertTrue(exception.getMessage().contains("Cannot reset branch 'main'"), exception.getMessage());
+    }
+
+    @Test
+    void resetRefusesACommitThatIsNotInTheBranchsHistory() {
+        RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DbGitCommandListener dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
+        dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
+        dbgit.execute("dbgit commit -m first table");
+        dbgit.execute("dbgit checkout -b feature/orders");
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> dbgit.execute("dbgit reset 99"));
+
+        assertTrue(exception.getMessage().contains("not in branch 'feature/orders' history"), exception.getMessage());
+        assertEquals(1, metadataStore.commitHistory("feature/orders").size());
+    }
+
+    @Test
+    void resetRefusesSomethingThatIsNotACommitId() {
+        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                new InMemoryMetadataStore()));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> dbgit.execute("dbgit reset head~1"));
+
+        assertTrue(exception.getMessage().contains("Not a commit id"), exception.getMessage());
+    }
+
+    /** Commit timestamps are wall-clock, so assertions compare everything about an entry except its Date line. */
+    private static List<String> withoutDates(List<String> lines) {
+        return lines.stream().filter(line -> !line.startsWith("Date:") && !line.isBlank()).toList();
+    }
+
     private static final class RecordingRunner implements CommandRunner {
         private final List<CommandResult> results;
         private final List<List<String>> commands = new ArrayList<>();
@@ -477,6 +653,7 @@ class DbGitCommandsTest {
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
         private final Map<Long, Long> parentCommitById = new HashMap<>();
         private final Map<Long, Long> secondParentCommitById = new HashMap<>();
+        private final Map<Long, CommitMetadata> metadataByCommit = new HashMap<>();
         private final Map<String, Long> headCommitByBranch = new HashMap<>();
         private final AtomicLong nextChangesetId = new AtomicLong(1);
         private final AtomicLong nextCommitId = new AtomicLong(1);
@@ -515,16 +692,18 @@ class DbGitCommandsTest {
         }
 
         @Override
-        public List<ChangeSet> commitHistory(String branch) {
+        public List<CommitEntry> commits(String branch) {
             List<Long> order = new ArrayList<>();
             collectOrder(headCommitByBranch.get(branch), new LinkedHashSet<>(), order);
-            List<ChangeSet> history = new ArrayList<>();
+            List<CommitEntry> entries = new ArrayList<>();
             for (long commitId : order) {
-                for (long changesetId : changesetIdsByCommit.getOrDefault(commitId, List.of())) {
-                    history.add(changesetsById.get(changesetId));
-                }
+                List<ChangeSet> changesets = changesetIdsByCommit.getOrDefault(commitId, List.<Long>of()).stream()
+                        .map(changesetsById::get).toList();
+                Commit commit = new Commit(commitId, metadataByCommit.get(commitId), Instant.now(),
+                        new CommitParents(parentCommitById.get(commitId), secondParentCommitById.get(commitId)));
+                entries.add(new CommitEntry(commit, changesets));
             }
-            return history;
+            return entries;
         }
 
         /**
@@ -544,12 +723,13 @@ class DbGitCommandsTest {
         }
 
         @Override
-        public long commit(String branch, List<Long> changesetIds) {
+        public long commit(String branch, List<Long> changesetIds, CommitMetadata metadata) {
             List<Long> applied = changesetIds.stream()
                     .filter(id -> changesetsById.get(id).status() == ChangesetStatus.APPLIED)
                     .toList();
             long commitId = nextCommitId.getAndIncrement();
             parentCommitById.put(commitId, headCommitByBranch.get(branch));
+            metadataByCommit.put(commitId, metadata);
             headCommitByBranch.put(branch, commitId);
             changesetIdsByCommit.put(commitId, applied);
             for (long id : applied) {
@@ -560,12 +740,29 @@ class DbGitCommandsTest {
         }
 
         @Override
-        public long createMergeCommit(String branch, String otherBranch) {
+        public long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata) {
             long commitId = nextCommitId.getAndIncrement();
             parentCommitById.put(commitId, headCommitByBranch.get(branch));
             secondParentCommitById.put(commitId, headCommitByBranch.get(otherBranch));
+            metadataByCommit.put(commitId, metadata);
             headCommitByBranch.put(branch, commitId);
             return commitId;
+        }
+
+        @Override
+        public int resetTo(String branch, long commitId) {
+            List<Long> order = new ArrayList<>();
+            collectOrder(headCommitByBranch.get(branch), new LinkedHashSet<>(), order);
+            if (!order.contains(commitId)) {
+                throw new IllegalArgumentException("Commit #" + commitId + " is not in branch '" + branch + "' history.");
+            }
+            headCommitByBranch.put(branch, commitId);
+            List<Long> dropped = changesetsById.values().stream()
+                    .filter(changeset -> changeset.branch().equals(branch) && changeset.status() != ChangesetStatus.COMMIT)
+                    .map(ChangeSet::id)
+                    .toList();
+            dropped.forEach(changesetsById::remove);
+            return dropped.size();
         }
     }
 

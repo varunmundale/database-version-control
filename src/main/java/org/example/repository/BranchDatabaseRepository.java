@@ -62,6 +62,16 @@ public final class BranchDatabaseRepository {
                 "create branch database '" + database + "'");
     }
 
+    /**
+     * Drops a branch's database if it is there, so it can be rebuilt from history - what {@code dbgit reset} does
+     * before replaying. Postgres refuses while anything else is connected to it, which surfaces as a
+     * {@link RepositoryException} rather than a silently half-reset branch.
+     */
+    public void dropDatabase(String database) {
+        execute(config.connectionTo(adminDatabase()), "DROP DATABASE IF EXISTS \"" + database + "\"",
+                "drop branch database '" + database + "'");
+    }
+
     /** Runs one DDL statement against a branch's database. */
     public void apply(String database, String ddl) {
         apply(config.connectionTo(database), ddl);
@@ -72,7 +82,13 @@ public final class BranchDatabaseRepository {
         execute(target, ddl, "apply DDL to database '" + target.database() + "'");
     }
 
-    /** Replays a history into a branch's database over a single connection, in order, stopping at the first failure. */
+    /**
+     * Replays a history into a branch's database over a single connection, in order, as one transaction: a branch
+     * database is either the schema its whole history describes or untouched, never a partial build nobody can
+     * name. This is {@link SqlConnector#transaction}'s job on this side of the two-database split, the way
+     * {@code MetadataDatabase.transaction} is jOOQ's on the metadata side - PostgreSQL runs DDL transactionally,
+     * so a failing statement takes every statement before it back out with it.
+     */
     public void replay(String database, List<ChangeSet> changesets) {
         replay(config.connectionTo(database), changesets);
     }
@@ -82,14 +98,17 @@ public final class BranchDatabaseRepository {
         Objects.requireNonNull(changesets, "changesets must not be null");
         String database = target.database();
         try (SqlConnector connector = connect(target)) {
-            for (ChangeSet changeset : changesets) {
-                try {
-                    connector.execute(changeset.ddl());
-                } catch (SQLException exception) {
-                    throw new RepositoryException("Could not replay changeset #" + changeset.id() + " against database '"
-                            + database + "': " + exception.getMessage(), exception);
+            connector.transaction(transacted -> {
+                for (ChangeSet changeset : changesets) {
+                    try {
+                        transacted.execute(changeset.ddl());
+                    } catch (SQLException exception) {
+                        throw new RepositoryException("Could not replay changeset #" + changeset.id()
+                                + " against database '" + database + "': " + exception.getMessage(), exception);
+                    }
                 }
-            }
+                return null;
+            });
         } catch (SQLException exception) {
             throw new RepositoryException("Could not replay history against database '" + database + "': "
                     + exception.getMessage(), exception);

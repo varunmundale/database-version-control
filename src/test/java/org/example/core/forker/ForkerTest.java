@@ -9,6 +9,10 @@ import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.CommitMetadata;
+import org.example.models.versioning.CommitParents;
+import org.example.models.versioning.CommitEntry;
+import org.example.models.versioning.Commit;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.Test;
@@ -204,19 +208,29 @@ class ForkerTest {
             return List.of();
         }
 
+        /** The seeded history as a single commit - enough for a fork, which only replays what a branch inherited. */
         @Override
-        public List<ChangeSet> commitHistory(String branch) {
-            return commitHistoryByBranch.getOrDefault(branch, List.of());
+        public List<CommitEntry> commits(String branch) {
+            List<ChangeSet> history = commitHistoryByBranch.getOrDefault(branch, List.of());
+            return history.isEmpty()
+                    ? List.of()
+                    : List.of(new CommitEntry(new Commit(1, new CommitMetadata("tester", "seeded"), Instant.now(),
+                            new CommitParents(null, null)), history));
         }
 
         @Override
-        public long commit(String branch, List<Long> changesetIds) {
+        public long commit(String branch, List<Long> changesetIds, CommitMetadata metadata) {
             return nextId++;
         }
 
         @Override
-        public long createMergeCommit(String branch, String otherBranch) {
+        public long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata) {
             return nextId++;
+        }
+
+        @Override
+        public int resetTo(String branch, long commitId) {
+            return 0;
         }
     }
 

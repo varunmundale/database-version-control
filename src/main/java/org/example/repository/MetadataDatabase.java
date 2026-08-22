@@ -69,7 +69,16 @@ public final class MetadataDatabase {
         });
     }
 
-    /** Runs {@code work} - and every repository call it makes - in one transaction, rolled back if it throws. */
+    /**
+     * Runs {@code work} - and every repository call it makes - in one transaction, rolled back if it throws.
+     *
+     * <p>Deliberately jOOQ's transaction rather than {@link org.example.connectors.SqlConnector#transaction}: the
+     * repositories in this package speak jOOQ, not raw SQL strings, so they need a {@link DSLContext} bound to the
+     * transaction's connection, which the {@link ThreadLocalTransactionProvider} above supplies without any of them
+     * taking a connection argument. The connectors package is still what opens the connection - see
+     * {@link BorrowedConnections} - so there is one place a JDBC connection is made, and two transaction APIs only
+     * because there are two client libraries.
+     */
     public <T> T transaction(String failureMessage, Supplier<T> work) {
         return guard(failureMessage, () -> dsl.transactionResult(work::get));
     }

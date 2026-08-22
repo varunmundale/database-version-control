@@ -53,6 +53,18 @@ public final class ChangesetRepository {
                 .execute();
     }
 
+    /**
+     * Discards a branch's changesets that never made it into a commit - its working set. What {@code dbgit reset}
+     * drops; committed changesets are left alone, since other branches reach them through the shared commit graph.
+     * Returns how many rows were removed.
+     */
+    public int deleteUncommitted(String branchName) {
+        return dsl().deleteFrom(TABLE)
+                .where(BRANCH_NAME.eq(branchName))
+                .and(STATUS.in(ChangesetStatus.PENDING.name(), ChangesetStatus.APPLIED.name()))
+                .execute();
+    }
+
     /** Every changeset staged for a branch, in staged order, regardless of status. */
     public List<ChangeSet> findByBranch(String branchName) {
         return select().where(BRANCH_NAME.eq(branchName)).orderBy(ID).fetch(ChangesetRepository::toChangeSet);

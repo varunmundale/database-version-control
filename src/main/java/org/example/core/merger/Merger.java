@@ -8,6 +8,7 @@ import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
 import org.example.models.schema.TableModel;
 import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.CommitMetadata;
 import org.example.core.versioning.VersioningService;
 
 import java.util.ArrayList;
@@ -63,7 +64,8 @@ public final class Merger {
 
         forker.branchDatabases().replay(connections.forBranch(currentBranch), otherOnly);
 
-        long commitId = versioningService.createMergeCommit(currentBranch, otherBranch);
+        long commitId = versioningService.createMergeCommit(currentBranch, otherBranch,
+                CommitMetadata.by(null, "Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));
         return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());
     }
 

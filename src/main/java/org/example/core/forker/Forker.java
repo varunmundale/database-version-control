@@ -50,6 +50,14 @@ public final class Forker {
         return branchDatabases;
     }
 
+    /**
+     * Brings the shared scratchpad container up and waits until it answers - the precondition for creating any
+     * branch database, whether {@link #fork} is building a new one or {@code dbgit reset} is rebuilding one.
+     */
+    public void ensureBranchDatabasesRunning() {
+        sharedContainer.ensureRunning();
+    }
+
     public ForkResult fork(String fromBranch, String currentBranch) {
         validateBranch(fromBranch, "fromBranch");
         validateBranch(currentBranch, "currentBranch");
@@ -58,7 +66,7 @@ public final class Forker {
             throw fail("Branch already exists: " + currentBranch, null);
         }
 
-        sharedContainer.ensureRunning();
+        ensureBranchDatabasesRunning();
 
         String database = BranchConnections.forkedDatabaseName(currentBranch);
         List<ChangeSet> history = versioningService.commitHistory(currentBranch);

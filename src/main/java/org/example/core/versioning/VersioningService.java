@@ -2,6 +2,8 @@ package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
+import org.example.models.versioning.CommitEntry;
+import org.example.models.versioning.CommitMetadata;
 import org.example.config.ConnectionSettings;
 import org.example.config.TrackedDatabaseConfig;
 
@@ -29,15 +31,19 @@ public interface VersioningService {
     /** Every changeset staged for a branch, in the order they were staged, regardless of status. */
     List<ChangeSet> changesetsForBranch(String branch);
 
-    /** The branch's committed changesets, walked from the root commit to its current HEAD. */
-    List<ChangeSet> commitHistory(String branch);
+    /**
+     * The branch's commits, walked from the root commit to its current HEAD, each with the changesets folded into
+     * it. The one ancestry walk everything else about a branch's history is derived from - {@code dbgit log}
+     * renders these, {@link #commitHistory} flattens them, and {@code dbgit reset} truncates them at a commit.
+     */
+    List<CommitEntry> commits(String branch);
 
     /**
      * Folds the given APPLIED changesets into one new commit, chained after the branch's current HEAD commit
      * (updating both the new commit's backward pointer and the previous HEAD's forward pointer). Changesets not
      * currently APPLIED are silently skipped. Returns the new commit's id.
      */
-    long commit(String branch, List<Long> changesetIds);
+    long commit(String branch, List<Long> changesetIds, CommitMetadata metadata);
 
     /**
      * Creates a merge commit for {@code branch}: chains its current HEAD as the first parent and
@@ -45,7 +51,14 @@ public interface VersioningService {
      * brings in stay attributed to the commits that originally introduced them, reachable by walking both parent
      * chains. Moves {@code branch}'s HEAD to the new commit. Returns the new commit's id.
      */
-    long createMergeCommit(String branch, String otherBranch);
+    long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata);
+
+    /**
+     * Moves a branch's HEAD back to {@code commitId} and discards its working set outright. The commit must be one
+     * of the branch's own ancestors. Commits after it are left in the graph untouched, just no longer reachable
+     * from this branch - other branches may still share them. Returns how many working changesets were dropped.
+     */
+    int resetTo(String branch, long commitId);
 
     /**
      * Records which physical database a branch's DDL is applied to, replacing any previous record for that branch.
@@ -55,6 +68,22 @@ public interface VersioningService {
 
     /** What the branch tracks, or empty if it has never been initialised. */
     Optional<TrackedDatabaseConfig> trackedDatabase(String branch);
+
+    /** The branch's committed changesets, walked from the root commit to its current HEAD. */
+    default List<ChangeSet> commitHistory(String branch) {
+        return commits(branch).stream().flatMap(entry -> entry.changesets().stream()).toList();
+    }
+
+    /**
+     * Everything staged on a branch that no commit has claimed yet, in staged order - what {@code dbgit log} shows
+     * above the commits and what {@code dbgit reset} throws away. Wider than {@link #appliedChangesets}: a
+     * changeset that failed against the database is still PENDING, and still part of what is lying around.
+     */
+    default List<ChangeSet> workingSet(String branch) {
+        return changesetsForBranch(branch).stream()
+                .filter(changeset -> changeset.status() != ChangesetStatus.COMMIT)
+                .toList();
+    }
 
     /** The branch's changesets that have run against its database but aren't part of a commit yet. */
     default List<ChangeSet> appliedChangesets(String branch) {

@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS branch_commits (
 ALTER TABLE branch_commits
     ADD COLUMN IF NOT EXISTS second_parent_commit_id BIGINT REFERENCES branch_commits(id);
 
+-- Likewise for commits created before dbgit recorded who wrote them and why; both read back defaulted.
+ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS author TEXT;
+ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS message TEXT;
+
 CREATE TABLE IF NOT EXISTS branch_metadata (
     branch_name    TEXT PRIMARY KEY,
     forked_from    TEXT,

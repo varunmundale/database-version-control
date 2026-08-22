@@ -10,6 +10,10 @@ import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.CommitMetadata;
+import org.example.models.versioning.CommitParents;
+import org.example.models.versioning.CommitEntry;
+import org.example.models.versioning.Commit;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
@@ -231,7 +235,7 @@ class DbGitCommandListenerTest {
         }
 
         @Override
-        public List<ChangeSet> commitHistory(String branch) {
+        public List<CommitEntry> commits(String branch) {
             List<Long> chain = new ArrayList<>();
             Long current = headCommitByBranch.get(branch);
             while (current != null) {
@@ -239,17 +243,18 @@ class DbGitCommandListenerTest {
                 current = parentCommitById.get(current);
             }
             Collections.reverse(chain);
-            List<ChangeSet> history = new ArrayList<>();
+            List<CommitEntry> entries = new ArrayList<>();
             for (long commitId : chain) {
-                for (long changesetId : changesetIdsByCommit.getOrDefault(commitId, List.of())) {
-                    history.add(changesetsById.get(changesetId));
-                }
+                List<ChangeSet> changesets = changesetIdsByCommit.getOrDefault(commitId, List.<Long>of()).stream()
+                        .map(changesetsById::get).toList();
+                entries.add(new CommitEntry(new Commit(commitId, new CommitMetadata("tester", ""), Instant.now(),
+                        new CommitParents(parentCommitById.get(commitId), null)), changesets));
             }
-            return history;
+            return entries;
         }
 
         @Override
-        public long commit(String branch, List<Long> changesetIds) {
+        public long commit(String branch, List<Long> changesetIds, CommitMetadata metadata) {
             List<Long> applied = changesetIds.stream()
                     .filter(id -> changesetsById.get(id).status() == ChangesetStatus.APPLIED)
                     .toList();
@@ -265,11 +270,17 @@ class DbGitCommandListenerTest {
         }
 
         @Override
-        public long createMergeCommit(String branch, String otherBranch) {
+        public long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata) {
             long commitId = nextCommitId.getAndIncrement();
             parentCommitById.put(commitId, headCommitByBranch.get(branch));
             headCommitByBranch.put(branch, commitId);
             return commitId;
+        }
+
+        @Override
+        public int resetTo(String branch, long commitId) {
+            headCommitByBranch.put(branch, commitId);
+            return 0;
         }
     }
 }
