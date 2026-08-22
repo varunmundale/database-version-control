@@ -20,6 +20,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * The metadata store: the standalone PostgreSQL server dbgit's own bookkeeping lives in. Creates the database and
@@ -129,20 +130,32 @@ public final class MetadataDatabase {
      * Applies {@code metadata-schema.sql} - the metadata store's tables. The DDL lives in a {@code .sql} file
      * rather than in Java string literals: it is SQL, read far more often than it is executed, and nothing here
      * needs to interpolate anything into it. Every statement in that file is idempotent, so this runs unconditionally
-     * whether the schema already exists or not; statements are split on {@code ;}, which the file never uses inside
-     * a literal.
+     * whether the schema already exists or not.
+     *
+     * <p>Comments come out before the split on {@code ;}, because the comments in that file are prose and prose
+     * has semicolons in it - one of them used to cut a statement in half and leave the rest of an English sentence
+     * to be executed as SQL, which meant a metadata database could never be created from scratch. Neither
+     * {@code --} nor {@code ;} appears inside a literal there, so dropping whole comments and splitting on the
+     * rest is enough.
      */
     private static void applySchema(DSLContext ctx) {
         try (InputStream input = MetadataDatabase.class.getClassLoader().getResourceAsStream(SCHEMA_FILE)) {
             if (input == null) {
                 throw new RepositoryException("Missing " + SCHEMA_FILE + " on the classpath");
             }
-            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            String sql = withoutComments(new String(input.readAllBytes(), StandardCharsets.UTF_8));
             Arrays.stream(sql.split(";")).map(String::strip).filter(statement -> !statement.isBlank())
                     .forEach(ctx::execute);
         } catch (IOException exception) {
             throw new RepositoryException("Could not read " + SCHEMA_FILE + ": " + exception.getMessage(), exception);
         }
+    }
+
+    /** Everything from a {@code --} to the end of its line, removed - see {@link #applySchema}. */
+    private static String withoutComments(String sql) {
+        return sql.lines()
+                .map(line -> line.indexOf("--") < 0 ? line : line.substring(0, line.indexOf("--")))
+                .collect(Collectors.joining("\n"));
     }
 
     /**

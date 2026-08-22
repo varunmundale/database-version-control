@@ -1,0 +1,32 @@
+{
+  "//": "The test classpath's dbgit.json, which shadows src/main/resources' for the whole test run.",
+  "//metadata": "The only section that differs: the integration tests bind a throwaway PostgreSQL container to this port, so nothing here touches the developer's own metadata server on 5432. It is fixed rather than ephemeral because the config is read once, statically, before any container can start - so the container follows the config, not the other way round.",
+
+  "service": {
+    "port": 47615
+  },
+  "metadata": {
+    "host": "localhost",
+    "port": 54329,
+    "user": "postgres",
+    "password": "postgres",
+    "adminDatabase": "postgres",
+    "database": "dbgit_metadata"
+  },
+  "concurrency": {
+    "handlerThreads": 8,
+    "queueDepth": 64,
+    "socketTimeoutMs": 30000,
+    "drainTimeoutMs": 30000,
+    "lockTimeoutMs": 60000
+  },
+  "branchDatabases": {
+    "containerName": "postgres-branches-scratchpad",
+    "image": "postgres:16-alpine",
+    "user": "postgres",
+    "password": "postgres",
+    "adminDatabase": "postgres",
+    "hostPort": 55432,
+    "dialect": "postgresql"
+  }
+}
