@@ -3,6 +3,7 @@ package org.example.core.differ;
 import org.example.models.schema.ColumnModel;
 import org.example.models.schema.ConstraintModel;
 import org.example.models.schema.IndexModel;
+import org.example.models.schema.SchemaElement;
 import org.example.models.schema.StableId;
 import org.example.models.schema.TableModel;
 
@@ -13,8 +14,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiPredicate;
-import java.util.function.Function;
 
 /**
  * One table, matched by name (a table rename is not tracked, so a renamed table shows up as one disappearing and a
@@ -43,14 +42,13 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
      * is ordered by name.
      */
     public static TableDiff between(String tableName, TableModel left, TableModel right) {
-        List<ColumnDiff> columns = matchById(columnsOf(left), columnsOf(right), ColumnModel::id, ColumnModel::differsFrom)
+        List<ColumnDiff> columns = matchById(columnsOf(left), columnsOf(right))
                 .stream().map(match -> new ColumnDiff(match.id(), match.left(), match.right()))
                 .sorted(Comparator.comparing(ColumnDiff::columnName)).toList();
-        List<ConstraintDiff> constraints = matchById(constraintsOf(left), constraintsOf(right),
-                ConstraintModel::id, ConstraintModel::differsFrom)
+        List<ConstraintDiff> constraints = matchById(constraintsOf(left), constraintsOf(right))
                 .stream().map(match -> new ConstraintDiff(match.id(), match.left(), match.right()))
                 .sorted(Comparator.comparing(ConstraintDiff::constraintName)).toList();
-        List<IndexDiff> indexes = matchById(indexesOf(left), indexesOf(right), IndexModel::id, IndexModel::differsFrom)
+        List<IndexDiff> indexes = matchById(indexesOf(left), indexesOf(right))
                 .stream().map(match -> new IndexDiff(match.id(), match.left(), match.right()))
                 .sorted(Comparator.comparing(IndexDiff::indexName)).toList();
         return new TableDiff(tableName, left, right, columns, constraints, indexes);
@@ -75,30 +73,31 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
     }
 
     /**
-     * Pairs up two sides' objects by stable id and keeps only the ids worth reporting: present on one side only, or
-     * present on both but differing. The one matching rule columns, constraints and indexes all share.
+     * Pairs up two sides' members by stable id and keeps only the ids worth reporting: present on one side only, or
+     * present on both but differing. The one matching rule columns, constraints and indexes all share - written
+     * once over {@link SchemaElement}, which is what gives all three an id and a way to compare against their kind.
      */
-    private static <M> List<Match<M>> matchById(List<M> left, List<M> right, Function<M, StableId> idOf, BiPredicate<M, M> differs) {
-        Map<StableId, M> leftById = byId(left, idOf);
-        Map<StableId, M> rightById = byId(right, idOf);
+    private static <S extends SchemaElement<S>> List<Match<S>> matchById(List<S> left, List<S> right) {
+        Map<StableId, S> leftById = byId(left);
+        Map<StableId, S> rightById = byId(right);
 
         Set<StableId> ids = new LinkedHashSet<>(leftById.keySet());
         ids.addAll(rightById.keySet());
 
-        List<Match<M>> matches = new ArrayList<>();
+        List<Match<S>> matches = new ArrayList<>();
         for (StableId id : ids) {
-            M leftItem = leftById.get(id);
-            M rightItem = rightById.get(id);
-            if (leftItem == null || rightItem == null || differs.test(leftItem, rightItem)) {
+            S leftItem = leftById.get(id);
+            S rightItem = rightById.get(id);
+            if (leftItem == null || rightItem == null || leftItem.differsFrom(rightItem)) {
                 matches.add(new Match<>(id, leftItem, rightItem));
             }
         }
         return matches;
     }
 
-    private static <M> Map<StableId, M> byId(List<M> items, Function<M, StableId> idOf) {
-        Map<StableId, M> byId = new LinkedHashMap<>();
-        items.forEach(item -> byId.put(idOf.apply(item), item));
+    private static <S extends SchemaElement<S>> Map<StableId, S> byId(List<S> members) {
+        Map<StableId, S> byId = new LinkedHashMap<>();
+        members.forEach(member -> byId.put(member.id(), member));
         return byId;
     }
 
@@ -114,7 +113,7 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
         return table == null ? List.of() : table.indexes();
     }
 
-    /** One object as it stands on each side; at least one is always present. */
-    private record Match<M>(StableId id, M left, M right) {
+    /** One member as it stands on each side; at least one is always present. */
+    private record Match<S>(StableId id, S left, S right) {
     }
 }

@@ -1,6 +1,6 @@
 package org.example.repository;
 
-import org.example.models.tracking.TrackedDatabase;
+import org.example.config.TrackedDatabaseConfig;
 import org.jooq.DSLContext;
 import org.jooq.Field;
 import org.jooq.Record;
@@ -12,7 +12,7 @@ import java.util.Optional;
 
 /**
  * The {@code tracked_databases} table: which physical database each branch's DDL is applied to. Holds no password -
- * see {@link TrackedDatabase}.
+ * see {@link TrackedDatabaseConfig}.
  */
 public final class TrackedDatabaseRepository {
     private static final TrackedDatabaseRepository INSTANCE = new TrackedDatabaseRepository();
@@ -33,7 +33,7 @@ public final class TrackedDatabaseRepository {
     }
 
     /** Records what a branch tracks, replacing whatever it tracked before - which is what makes re-initialising idempotent. */
-    public void upsert(TrackedDatabase tracked) {
+    public void upsert(TrackedDatabaseConfig tracked) {
         dsl().insertInto(TABLE, BRANCH_NAME, SIGNATURE, HOST, PORT, DATABASE_NAME, DB_USER)
                 .values(tracked.branch(), tracked.signature(), tracked.host(), tracked.port(),
                         tracked.database(), tracked.user())
@@ -48,11 +48,11 @@ public final class TrackedDatabaseRepository {
                 .execute();
     }
 
-    public Optional<TrackedDatabase> find(String branch) {
-        return dsl().select(BRANCH_NAME, SIGNATURE, HOST, PORT, DATABASE_NAME, DB_USER).from(TABLE)
+    public Optional<TrackedDatabaseConfig> find(String branch) {
+        return dsl().select(BRANCH_NAME, HOST, PORT, DATABASE_NAME, DB_USER).from(TABLE)
                 .where(BRANCH_NAME.eq(branch))
-                .fetchOptional(row -> new TrackedDatabase(row.value1(), row.value2(), row.value3(),
-                        row.value4(), row.value5(), row.value6()));
+                .fetchOptional(row -> new TrackedDatabaseConfig(row.value1(), row.value2(), row.value3(),
+                        row.value4(), row.value5()));
     }
 
     private static DSLContext dsl() {

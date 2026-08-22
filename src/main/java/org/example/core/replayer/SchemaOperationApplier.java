@@ -6,22 +6,21 @@ import org.example.models.schema.IndexModel;
 import org.example.models.schema.StableId;
 import org.example.models.schema.TableModel;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 /**
- * Applies an already-parsed {@link SchemaOperation} to the internal model - one pure function per operation kind,
- * with no knowledge of any vendor's DDL syntax. Every {@link org.example.parsers.DdlParser}, whatever dialect it
- * understands, produces operations that land here unchanged.
+ * Applies an already-parsed {@link SchemaOperation} to the internal model, with no knowledge of any vendor's DDL
+ * syntax. Every {@link org.example.parsers.DdlParser}, whatever dialect it understands, produces operations that
+ * land here unchanged.
  *
- * <p>{@code renameColumn} and {@code alterColumnType} are the two operations that mutate a column without
- * replacing it: they carry the existing {@link ColumnModel#id()} forward rather than deriving a new one, so a
- * column renamed on one branch and modified under its old name on another are still recognized, by stable id, as
- * the same object when diffed.
+ * <p>Each application opens a {@link TableEditor} on the table the operation names, then edits the one member list
+ * the operation is about. Finding the table, looking a member up by name, rejecting a name already taken and
+ * folding the result back into the table all belong to the editor and its {@link TableMembers}, so what is left
+ * here is only what distinguishes one operation from another.
  *
- * <p>Constraints and indexes arrive naming the columns they cover; resolving those names to the columns they
- * actually refer to happens here, so a constraint is stored against stable ids and survives a later
- * {@code RENAME COLUMN} of a column it covers.
+ * <p>The dispatch is a pattern switch over a sealed type rather than a registry of handlers: the compiler then
+ * proves every operation is handled, and adding one to {@link SchemaOperation} fails the build here until it is.
  */
 public final class SchemaOperationApplier {
 
@@ -29,101 +28,55 @@ public final class SchemaOperationApplier {
      * @param existing the table's current state, or {@code null} if it does not exist yet
      */
     public TableModel apply(String schema, SchemaOperation operation, TableModel existing) {
+        TableEditor editor = TableEditor.on(schema, operation.tableName(), existing);
         return switch (operation) {
-            case SchemaOperation.CreateTable op -> createTable(schema, op, existing);
-            case SchemaOperation.AddColumn op -> addColumn(requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.DropColumn op -> dropColumn(requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.RenameColumn op -> renameColumn(requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.AlterColumnType op -> alterColumnType(requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.AddConstraint op -> addConstraint(schema, requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.DropConstraint op -> dropConstraint(requireExisting(existing, op.tableName()), op);
-            case SchemaOperation.CreateIndex op -> createIndex(requireExisting(existing, op.tableName()), op);
+            case SchemaOperation.CreateTable op -> createTable(editor, op);
+            case SchemaOperation.AddColumn op -> editor.columns().add(op.column().identifiedIn(editor.tableId()));
+            case SchemaOperation.DropColumn op -> editor.columns().remove(op.columnName());
+            case SchemaOperation.RenameColumn op -> rewriteColumn(editor, op.oldName(), column -> column.renamedTo(op.newName()));
+            case SchemaOperation.AlterColumnType op -> rewriteColumn(editor, op.columnName(), column -> column.retyped(op.newType()));
+            case SchemaOperation.AddConstraint op -> editor.constraints().add(constraint(editor, op));
+            case SchemaOperation.DropConstraint op -> editor.constraints().remove(op.constraintName());
+            case SchemaOperation.CreateIndex op -> editor.indexes().add(index(editor, op));
         };
     }
 
-    private TableModel createTable(String schema, SchemaOperation.CreateTable op, TableModel existing) {
-        if (existing != null) {
+    /** The one operation that expects no table to be there yet - and the one place a table's stable id is minted. */
+    private TableModel createTable(TableEditor editor, SchemaOperation.CreateTable op) {
+        if (editor.tableExists()) {
             if (op.ifNotExists()) {
-                return existing;
+                return editor.table();
             }
             throw new IllegalArgumentException("Table already exists: " + op.tableName());
         }
-        StableId tableId = StableId.of("table", schema + "." + op.tableName());
-        List<ColumnModel> columns = new ArrayList<>();
-        for (ColumnModel column : op.columns()) {
-            columns.add(newColumn(tableId, column));
-        }
-        return new TableModel(tableId, schema, op.tableName(), columns, List.of(), List.of());
+        StableId tableId = StableId.forTable(editor.schema(), op.tableName());
+        List<ColumnModel> columns = op.columns().stream().map(column -> column.identifiedIn(tableId)).toList();
+        return new TableModel(tableId, editor.schema(), op.tableName(), columns, List.of(), List.of());
     }
 
-    private TableModel addColumn(TableModel existing, SchemaOperation.AddColumn op) {
-        String columnName = op.column().name();
-        if (existing.columns().stream().anyMatch(column -> column.name().equals(columnName))) {
-            throw new IllegalArgumentException("Column already exists: " + columnName);
-        }
-        List<ColumnModel> columns = new ArrayList<>(existing.columns());
-        columns.add(newColumn(existing.id(), op.column()));
-        return withColumns(existing, columns);
+    /**
+     * The two operations that change a column in place rather than replacing it. Both go through
+     * {@link ColumnModel}'s own rewrites, which carry the existing stable id forward - so a column renamed on one
+     * branch and modified under its old name on another are still recognized, by id, as the same column when diffed.
+     */
+    private TableModel rewriteColumn(TableEditor editor, String columnName, UnaryOperator<ColumnModel> rewrite) {
+        TableMembers<ColumnModel> columns = editor.columns();
+        ColumnModel target = columns.require(columnName);
+        return columns.replace(target, rewrite.apply(target));
     }
 
-    private TableModel dropColumn(TableModel existing, SchemaOperation.DropColumn op) {
-        ColumnModel target = columnOrThrow(existing, op.columnName());
-        return withColumns(existing, existing.columns().stream().filter(column -> column != target).toList());
-    }
-
-    private TableModel renameColumn(TableModel existing, SchemaOperation.RenameColumn op) {
-        ColumnModel target = columnOrThrow(existing, op.oldName());
-        if (existing.columns().stream().anyMatch(column -> column.name().equals(op.newName()))) {
-            throw new IllegalArgumentException("Column already exists: " + op.newName());
-        }
-        ColumnModel renamed = new ColumnModel(target.id(), op.newName(), target.nativeType(), target.nullable(), target.defaultValue());
-        return withColumns(existing, replace(existing, target, renamed));
-    }
-
-    private TableModel alterColumnType(TableModel existing, SchemaOperation.AlterColumnType op) {
-        ColumnModel target = columnOrThrow(existing, op.columnName());
-        ColumnModel updated = new ColumnModel(target.id(), target.name(), op.newType(), target.nullable(), target.defaultValue());
-        return withColumns(existing, replace(existing, target, updated));
-    }
-
-    private TableModel addConstraint(String schema, TableModel existing, SchemaOperation.AddConstraint op) {
-        if (existing.constraints().stream().anyMatch(constraint -> constraint.name().equals(op.constraintName()))) {
-            throw new IllegalArgumentException("Constraint already exists: " + op.constraintName());
-        }
-        StableId constraintId = StableId.of("constraint", existing.id().value() + "." + op.constraintName());
+    private ConstraintModel constraint(TableEditor editor, SchemaOperation.AddConstraint op) {
         StableId referencedTableId = op.referencedTableName() == null
                 ? null
-                : StableId.of("table", schema + "." + op.referencedTableName());
-
-        List<ConstraintModel> constraints = new ArrayList<>(existing.constraints());
-        constraints.add(new ConstraintModel(constraintId, op.constraintName(), op.type(),
-                columnIds(existing, op.columnNames()),
-                referencedTableId,
-                referencedColumnIds(referencedTableId, op.referencedColumnNames())));
-        return withConstraints(existing, constraints);
+                : StableId.forTable(editor.schema(), op.referencedTableName());
+        return new ConstraintModel(StableId.forConstraint(editor.tableId(), op.constraintName()),
+                op.constraintName(), op.type(), editor.columns().idsOf(op.columnNames()),
+                referencedTableId, referencedColumnIds(referencedTableId, op.referencedColumnNames()));
     }
 
-    private TableModel dropConstraint(TableModel existing, SchemaOperation.DropConstraint op) {
-        ConstraintModel target = existing.constraints().stream()
-                .filter(constraint -> constraint.name().equals(op.constraintName())).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Unknown constraint '" + op.constraintName() + "' on table '" + existing.name() + "'"));
-        return withConstraints(existing, existing.constraints().stream().filter(constraint -> constraint != target).toList());
-    }
-
-    private TableModel createIndex(TableModel existing, SchemaOperation.CreateIndex op) {
-        if (existing.indexes().stream().anyMatch(index -> index.name().equals(op.indexName()))) {
-            throw new IllegalArgumentException("Index already exists: " + op.indexName());
-        }
-        StableId indexId = StableId.of("index", existing.id().value() + "." + op.indexName());
-        List<IndexModel> indexes = new ArrayList<>(existing.indexes());
-        indexes.add(new IndexModel(indexId, op.indexName(), op.unique(), columnIds(existing, op.columnNames())));
-        return withIndexes(existing, indexes);
-    }
-
-    /** Resolves the column names a constraint or index covers to the stable ids of the columns they name. */
-    private static List<StableId> columnIds(TableModel table, List<String> columnNames) {
-        return columnNames.stream().map(name -> columnOrThrow(table, name).id()).toList();
+    private IndexModel index(TableEditor editor, SchemaOperation.CreateIndex op) {
+        return new IndexModel(StableId.forIndex(editor.tableId(), op.indexName()),
+                op.indexName(), op.unique(), editor.columns().idsOf(op.columnNames()));
     }
 
     /**
@@ -134,41 +87,6 @@ public final class SchemaOperationApplier {
         if (referencedTableId == null) {
             return List.of();
         }
-        return columnNames.stream()
-                .map(name -> StableId.of("column", referencedTableId.value() + "." + name))
-                .toList();
-    }
-
-    private static ColumnModel newColumn(StableId tableId, ColumnModel definition) {
-        StableId columnId = StableId.of("column", tableId.value() + "." + definition.name());
-        return definition.withId(columnId);
-    }
-
-    private static ColumnModel columnOrThrow(TableModel table, String columnName) {
-        return table.columns().stream().filter(column -> column.name().equals(columnName)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Unknown column '" + columnName + "' on table '" + table.name() + "'"));
-    }
-
-    private static List<ColumnModel> replace(TableModel existing, ColumnModel target, ColumnModel replacement) {
-        return existing.columns().stream().map(column -> column == target ? replacement : column).toList();
-    }
-
-    private static TableModel withColumns(TableModel existing, List<ColumnModel> columns) {
-        return new TableModel(existing.id(), existing.schema(), existing.name(), columns, existing.indexes(), existing.constraints());
-    }
-
-    private static TableModel withConstraints(TableModel existing, List<ConstraintModel> constraints) {
-        return new TableModel(existing.id(), existing.schema(), existing.name(), existing.columns(), existing.indexes(), constraints);
-    }
-
-    private static TableModel withIndexes(TableModel existing, List<IndexModel> indexes) {
-        return new TableModel(existing.id(), existing.schema(), existing.name(), existing.columns(), indexes, existing.constraints());
-    }
-
-    private static TableModel requireExisting(TableModel existing, String tableName) {
-        if (existing == null) {
-            throw new IllegalArgumentException("Unknown table: " + tableName);
-        }
-        return existing;
+        return columnNames.stream().map(name -> StableId.forColumn(referencedTableId, name)).toList();
     }
 }

@@ -4,10 +4,11 @@ import java.util.Objects;
 
 /**
  * A column, either fully identified as part of a {@link TableModel} or, via {@link #unassigned}, just as a
- * vendor's DDL grammar described it - before {@link org.example.core.replayer.SchemaOperationApplier} has derived its real
- * stable id from the table it belongs to and given it one with {@link #withId}.
+ * vendor's DDL grammar described it - before it has been given the real stable id it takes from the table it
+ * belongs to, with {@link #identifiedIn}.
  */
-public record ColumnModel(StableId id, String name, String nativeType, boolean nullable, String defaultValue) {
+public record ColumnModel(StableId id, String name, String nativeType, boolean nullable, String defaultValue)
+        implements SchemaElement<ColumnModel> {
     private static final StableId UNASSIGNED_ID = new StableId("column_unassigned");
 
     public ColumnModel {
@@ -16,13 +17,31 @@ public record ColumnModel(StableId id, String name, String nativeType, boolean n
         Objects.requireNonNull(nativeType, "nativeType must not be null");
     }
 
-    /** A column as parsed from DDL, with no stable id of its own yet - see {@link #withId}. */
+    /** A column as parsed from DDL, with no stable id of its own yet - see {@link #identifiedIn}. */
     public static ColumnModel unassigned(String name, String nativeType, boolean nullable, String defaultValue) {
         return new ColumnModel(UNASSIGNED_ID, name, nativeType, nullable, defaultValue);
     }
 
-    public ColumnModel withId(StableId id) {
+    private ColumnModel withId(StableId id) {
         return new ColumnModel(id, name, nativeType, nullable, defaultValue);
+    }
+
+    /** This column as a member of {@code tableId}, taking the stable id it will keep for the rest of its life. */
+    public ColumnModel identifiedIn(StableId tableId) {
+        return withId(StableId.forColumn(tableId, name));
+    }
+
+    /**
+     * The same column under a new name. The stable id is deliberately carried over, which is what makes a rename
+     * read as one column that changed rather than one dropped and another added.
+     */
+    public ColumnModel renamedTo(String newName) {
+        return new ColumnModel(id, newName, nativeType, nullable, defaultValue);
+    }
+
+    /** The same column with a new type; name and stable id unchanged. */
+    public ColumnModel retyped(String newNativeType) {
+        return new ColumnModel(id, name, newNativeType, nullable, defaultValue);
     }
 
     /** True when this column's type, nullability and default match another's, independent of name or id. */

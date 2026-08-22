@@ -2,7 +2,7 @@ package org.example.service.command;
 
 import org.example.config.ConnectionSettings;
 import org.example.connectors.SqlConnector;
-import org.example.models.tracking.TrackedDatabase;
+import org.example.config.TrackedDatabaseConfig;
 import org.example.service.DbGitCommandResult;
 
 import java.sql.SQLException;
@@ -16,7 +16,7 @@ import java.util.Optional;
  * real, already-existing database, so that everything committed on {@code main} is applied there rather than to a
  * throwaway scratchpad.
  *
- * <p>The details are split deliberately. The metadata store gets a {@link TrackedDatabase}: a signature plus host,
+ * <p>The details are split deliberately. The metadata store gets a {@link TrackedDatabaseConfig}: a signature plus host,
  * port, database and user, so any workspace can see what {@code main} is supposed to point at. The password is
  * written only to this workspace's {@code .dbgit/config.json}, which is local and gitignored - initialising a
  * branch never puts a credential anywhere shared.
@@ -40,19 +40,18 @@ public final class InitCommand extends Command {
         ConnectionSettings settings = parse();
         verifyReachable(settings);
 
-        Optional<TrackedDatabase> previous = context.versioningService().trackedDatabase(BRANCH);
-        TrackedDatabase tracked = context.versioningService()
-                .track(BRANCH, settings.host(), settings.port(), settings.database(), settings.user());
+        Optional<TrackedDatabaseConfig> previous = context.versioningService().trackedDatabase(BRANCH);
+        TrackedDatabaseConfig tracked = context.versioningService().track(BRANCH, settings);
         context.repository().track(BRANCH, settings);
 
         return print(List.of(describe(previous, tracked), "Signature: " + tracked.signature() + "."));
     }
 
-    private static String describe(Optional<TrackedDatabase> previous, TrackedDatabase tracked) {
+    private static String describe(Optional<TrackedDatabaseConfig> previous, TrackedDatabaseConfig tracked) {
         if (previous.isEmpty()) {
             return "Branch 'main' now tracks " + tracked.describe() + ".";
         }
-        if (previous.get().signature().equals(tracked.signature())) {
+        if (previous.get().tracksSameDatabaseAs(tracked)) {
             return "Branch 'main' already tracks " + tracked.describe() + "; connection details refreshed.";
         }
         return "Branch 'main' now tracks " + tracked.describe() + " (was " + previous.get().describe()

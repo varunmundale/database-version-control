@@ -2,7 +2,8 @@ package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
-import org.example.models.tracking.TrackedDatabase;
+import org.example.config.ConnectionSettings;
+import org.example.config.TrackedDatabaseConfig;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,12 +49,12 @@ public interface VersioningService {
 
     /**
      * Records which physical database a branch's DDL is applied to, replacing any previous record for that branch.
-     * Credential-free by construction - see {@link TrackedDatabase}. Returns what is now tracked.
+     * Credential-free by construction - see {@link TrackedDatabaseConfig}. Returns what is now tracked.
      */
-    TrackedDatabase track(String branch, String host, int port, String database, String user);
+    TrackedDatabaseConfig track(String branch, ConnectionSettings settings);
 
     /** What the branch tracks, or empty if it has never been initialised. */
-    Optional<TrackedDatabase> trackedDatabase(String branch);
+    Optional<TrackedDatabaseConfig> trackedDatabase(String branch);
 
     /** The branch's changesets that have run against its database but aren't part of a commit yet. */
     default List<ChangeSet> appliedChangesets(String branch) {

@@ -7,7 +7,8 @@ import java.util.Objects;
  * A named index over one or more of a table's columns, held by stable id rather than by column name so it survives
  * a later {@code RENAME COLUMN} of a column it covers. Like a constraint, its own identity comes from its name.
  */
-public record IndexModel(StableId id, String name, boolean unique, List<StableId> columnIds) {
+public record IndexModel(StableId id, String name, boolean unique, List<StableId> columnIds)
+        implements SchemaElement<IndexModel> {
     public IndexModel {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(name, "name must not be null");

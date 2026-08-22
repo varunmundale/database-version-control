@@ -2,7 +2,8 @@ package org.example.core.versioning;
 
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.CommitParents;
-import org.example.models.tracking.TrackedDatabase;
+import org.example.config.ConnectionSettings;
+import org.example.config.TrackedDatabaseConfig;
 import org.example.repository.BranchMetadataRepository;
 import org.example.repository.ChangesetRepository;
 import org.example.repository.CommitRepository;
@@ -38,14 +39,14 @@ public final class MetadataVersioningService implements VersioningService {
     }
 
     @Override
-    public TrackedDatabase track(String branch, String host, int port, String database, String user) {
-        TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
-        this.database.execute(() -> trackedDatabaseRepository.upsert(tracked));
+    public TrackedDatabaseConfig track(String branch, ConnectionSettings settings) {
+        TrackedDatabaseConfig tracked = TrackedDatabaseConfig.of(branch, settings);
+        database.execute(() -> trackedDatabaseRepository.upsert(tracked));
         return tracked;
     }
 
     @Override
-    public Optional<TrackedDatabase> trackedDatabase(String branch) {
+    public Optional<TrackedDatabaseConfig> trackedDatabase(String branch) {
         return database.query(() -> trackedDatabaseRepository.find(branch));
     }
 

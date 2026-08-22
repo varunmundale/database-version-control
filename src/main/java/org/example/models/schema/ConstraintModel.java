@@ -9,7 +9,8 @@ import java.util.Objects;
  * so renaming a constraint reads as one disappearing and another appearing.
  */
 public record ConstraintModel(StableId id, String name, ConstraintType type, List<StableId> columnIds,
-                              StableId referencedTableId, List<StableId> referencedColumnIds) {
+                              StableId referencedTableId, List<StableId> referencedColumnIds)
+        implements SchemaElement<ConstraintModel> {
     public ConstraintModel {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(name, "name must not be null");

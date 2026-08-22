@@ -7,7 +7,7 @@ import org.example.connectors.ConnectorFactory;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.SqlExecutionResult;
 import org.example.connectors.SqlTransaction;
-import org.example.models.tracking.TrackedDatabase;
+import org.example.config.TrackedDatabaseConfig;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.core.versioning.VersioningService;
@@ -144,17 +144,17 @@ class ForkerTest {
 
     /** A branch is just a name pointing at a commit; forking copies that pointer rather than creating new commits. */
     private static final class FakeMetadataStore implements VersioningService {
-        private final Map<String, TrackedDatabase> trackedByBranch = new HashMap<>();
+        private final Map<String, TrackedDatabaseConfig> trackedByBranch = new HashMap<>();
 
         @Override
-        public TrackedDatabase track(String branch, String host, int port, String database, String user) {
-            TrackedDatabase tracked = TrackedDatabase.of(branch, host, port, database, user);
+        public TrackedDatabaseConfig track(String branch, ConnectionSettings settings) {
+            TrackedDatabaseConfig tracked = TrackedDatabaseConfig.of(branch, settings);
             trackedByBranch.put(branch, tracked);
             return tracked;
         }
 
         @Override
-        public Optional<TrackedDatabase> trackedDatabase(String branch) {
+        public Optional<TrackedDatabaseConfig> trackedDatabase(String branch) {
             return Optional.ofNullable(trackedByBranch.get(branch));
         }
 
