@@ -28,7 +28,10 @@ import java.util.Locale;
  * <p>Understood statements:
  * <ul>
  *   <li>{@code CREATE TABLE} - columns only</li>
- *   <li>{@code ALTER TABLE ... ADD|DROP|RENAME COLUMN}, {@code ALTER TABLE ... ALTER COLUMN ... TYPE ...}</li>
+ *   <li>{@code ALTER TABLE ... ADD|DROP|RENAME COLUMN}, {@code ALTER TABLE ... ALTER COLUMN ... TYPE ...} or
+ *       MySQL's {@code ALTER TABLE ... MODIFY COLUMN ...} - both spellings of a retype funnel into the same
+ *       {@link SchemaOperation.AlterColumnType}, since the model only cares that the column's type changed, not
+ *       which dialect's syntax said so</li>
  *   <li>{@code ALTER TABLE ... ADD CONSTRAINT <name> PRIMARY KEY|UNIQUE|FOREIGN KEY (...)}</li>
  *   <li>{@code ALTER TABLE ... DROP CONSTRAINT <name>}</li>
  *   <li>{@code CREATE [UNIQUE] INDEX <name> ON <table> (...)}</li>
@@ -113,7 +116,7 @@ public final class PostgresDdlParser implements DdlParser {
                     : new SchemaOperation.DropConstraint(tableName, normalize(expression.getConstraintName()));
             case RENAME -> new SchemaOperation.RenameColumn(tableName,
                     normalize(expression.getColumnOldName()), normalize(expression.getColumnName()));
-            case ALTER -> toAlterColumnType(tableName, soleColumn(expression, ddl), ddl);
+            case ALTER, MODIFY -> toAlterColumnType(tableName, soleColumn(expression, ddl), ddl);
             default -> throw unsupported(ddl);
         };
     }
@@ -167,10 +170,12 @@ public final class PostgresDdlParser implements DdlParser {
     }
 
     /**
-     * Only {@code ALTER COLUMN ... TYPE ...} (optionally with a {@code USING <expr>} conversion clause, which is
-     * accepted but discarded - the internal model only needs the resulting type) is understood. {@code SET}/
-     * {@code DROP NOT NULL} and similar leave the type token empty or non-{@code USING} specs, which this rejects
-     * rather than silently misreading.
+     * Reached from either {@code ALTER COLUMN c TYPE t} (optionally with a {@code USING <expr>} conversion clause,
+     * which is accepted but discarded - the internal model only needs the resulting type) or MySQL's
+     * {@code MODIFY COLUMN c t} - JSqlParser tells the two apart via {@link net.sf.jsqlparser.statement.alter.AlterOperation},
+     * but both describe a column definition the same way, so one method builds the same
+     * {@link SchemaOperation.AlterColumnType} from either. {@code SET}/{@code DROP NOT NULL} and similar leave the
+     * type token empty or non-{@code USING} specs, which this rejects rather than silently misreading.
      */
     private SchemaOperation toAlterColumnType(String tableName, ColumnDefinition column, String ddl) {
         List<String> specs = column.getColumnSpecs();
@@ -266,7 +271,7 @@ public final class PostgresDdlParser implements DdlParser {
     private static IllegalArgumentException unsupported(String statement) {
         return new IllegalArgumentException("Unsupported DDL statement: " + statement
                 + ". Supported: CREATE TABLE (columns only); ALTER TABLE ADD|DROP|RENAME COLUMN;"
-                + " ALTER TABLE ALTER COLUMN ... TYPE; ALTER TABLE ADD CONSTRAINT ...; ALTER TABLE DROP CONSTRAINT;"
-                + " CREATE [UNIQUE] INDEX.");
+                + " ALTER TABLE ALTER COLUMN ... TYPE (or MySQL's ALTER TABLE ... MODIFY COLUMN ...);"
+                + " ALTER TABLE ADD CONSTRAINT ...; ALTER TABLE DROP CONSTRAINT; CREATE [UNIQUE] INDEX.");
     }
 }

@@ -5,6 +5,8 @@ import org.example.connectors.JdbcConnections;
 import org.example.connectors.SqlConnector;
 import org.example.connectors.h2.H2Connections;
 import org.example.connectors.h2.H2Connector;
+import org.example.connectors.mysql.MySqlConnections;
+import org.example.connectors.mysql.MySqlConnector;
 import org.example.connectors.postgres.PostgresConnections;
 import org.example.connectors.postgres.PostgresConnector;
 
@@ -43,6 +45,7 @@ public final class ConnectorRegistry {
     public static ConnectorRegistry builtins() {
         return new ConnectorRegistry()
                 .register("postgresql", PostgresConnections.INSTANCE, PostgresConnector::new)
+                .register("mysql", MySqlConnections.INSTANCE, MySqlConnector::new)
                 .register("h2", H2Connections.INSTANCE, H2Connector::new);
     }
 

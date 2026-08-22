@@ -5,22 +5,23 @@ import org.example.config.BranchDatabaseConfig;
 import org.example.repository.BranchDatabaseRepository;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
  * Ensures the single, persistent Docker container every branch's database is forked into is running and ready to
  * accept connections - starting it via the Docker CLI if it isn't, then polling until it accepts a real connection.
  *
- * <p>A no-op for any {@code branchDatabases.dialect} but {@code postgresql}: an in-memory H2 database needs no
- * server, no container and no Docker at all, so starting one would be pure waste. The docker commands themselves
- * stay Postgres-specific (the image env vars, the container's own port), since {@code postgresql} is the only
- * dialect that is actually a server process to bring up - the name and the dialect check are what generalized, so
- * {@link org.example.core.forker.Forker} does not have to know which dialects need a container and which don't.
+ * <p>A no-op for any {@code branchDatabases.dialect} {@link ContainerSpec} has no entry for: an in-memory H2
+ * database needs no server, no container and no Docker at all, so starting one would be pure waste. For a dialect
+ * that is a real server process - {@code postgresql}, {@code mysql} - the spec supplies the one thing that differs
+ * between them (the image's own env vars, its container port); everything else here - the readiness poll, the
+ * reuse-if-already-running check - is genuinely the same regardless of which server it is.
  */
 public final class SharedContainer {
-    private static final String POSTGRESQL_DIALECT = "postgresql";
-    private static final int CONTAINER_PORT = 5432;
+    private static final Map<String, ContainerSpec> SPECS = ContainerSpec.builtins();
     private static final int READY_ATTEMPTS = 20;
 
     /** Set once the container has been seen accepting connections; never unset, so the check is paid once. */
@@ -29,15 +30,17 @@ public final class SharedContainer {
     private final CommandRunner commandRunner;
     private final BranchDatabaseConfig config;
     private final BranchDatabaseRepository branchDatabases;
+    private final ContainerSpec spec;
 
     public SharedContainer(CommandRunner commandRunner, BranchDatabaseRepository branchDatabases) {
         this.commandRunner = Objects.requireNonNull(commandRunner, "commandRunner must not be null");
         this.config = BranchDatabaseConfig.getInstance();
         this.branchDatabases = Objects.requireNonNull(branchDatabases, "branchDatabases must not be null");
+        this.spec = SPECS.get(config.dialect());
     }
 
     public void ensureRunning() {
-        if (!config.dialect().equals(POSTGRESQL_DIALECT) || ready) {
+        if (spec == null || ready) {
             return;
         }
         synchronized (this) {
@@ -52,38 +55,38 @@ public final class SharedContainer {
 
     private void ensureStarted() {
         CommandResult inspect = run(List.of("docker", "inspect", "--format", "{{.State.Running}}", config.containerName()),
-                "inspect shared PostgreSQL container", false);
+                "inspect shared " + spec.label() + " container", false);
         if (inspect.succeeded() && inspect.output().equals("true")) {
-            out("Reusing shared PostgreSQL container '" + config.containerName() + "'.");
+            out("Reusing shared " + spec.label() + " container '" + config.containerName() + "'.");
             return;
         }
 
-        out("Starting shared PostgreSQL container '" + config.containerName() + "'.");
+        out("Starting shared " + spec.label() + " container '" + config.containerName() + "'.");
         // Another dbgit process may have won the race to create it; that is the outcome we wanted either way.
-        CommandResult started = run(List.of(
+        List<String> command = new ArrayList<>(List.of(
                 "docker", "run", "--detach", "--name", config.containerName(),
-                "--publish", config.hostPort() + ":" + CONTAINER_PORT,
-                "--env", "POSTGRES_USER=" + config.user(),
-                "--env", "POSTGRES_PASSWORD=" + config.password(),
-                "--env", "POSTGRES_DB=" + config.adminDatabase(),
-                config.image()), "start shared PostgreSQL container", false);
+                "--publish", config.hostPort() + ":" + spec.containerPort()));
+        spec.envArgs().apply(config).forEach(command::add);
+        command.add(config.image());
+        CommandResult started = run(command, "start shared " + spec.label() + " container", false);
         if (!started.succeeded() && !started.output().contains("already in use")) {
-            throw fail("Could not start shared PostgreSQL container. Docker said: " + started.output(), null);
+            throw fail("Could not start shared " + spec.label() + " container. Docker said: " + started.output(), null);
         }
     }
 
     private void waitUntilReady() {
-        out("Waiting for shared PostgreSQL container '" + config.containerName() + "' to accept connections on port " + config.hostPort() + ".");
+        out("Waiting for shared " + spec.label() + " container '" + config.containerName()
+                + "' to accept connections on port " + config.hostPort() + ".");
         for (int attempt = 1; attempt <= READY_ATTEMPTS; attempt++) {
             if (branchDatabases.isReachable()) {
-                out("Shared PostgreSQL container '" + config.containerName() + "' is ready.");
+                out("Shared " + spec.label() + " container '" + config.containerName() + "' is ready.");
                 return;
             }
             if (attempt < READY_ATTEMPTS) {
                 sleepBeforeRetry();
             }
         }
-        throw fail("Shared PostgreSQL container did not become ready after " + READY_ATTEMPTS + " attempts.", null);
+        throw fail("Shared " + spec.label() + " container did not become ready after " + READY_ATTEMPTS + " attempts.", null);
     }
 
     private CommandResult run(List<String> command, String operation, boolean printFailure) {
@@ -106,7 +109,7 @@ public final class SharedContainer {
             Thread.sleep(500);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw fail("Interrupted while waiting for PostgreSQL to start.", exception);
+            throw fail("Interrupted while waiting for " + spec.label() + " to start.", exception);
         }
     }
 

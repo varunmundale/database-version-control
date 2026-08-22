@@ -123,6 +123,21 @@ class PostgresDdlParserTest {
         assertEquals("integer", operation.newType());
     }
 
+    /**
+     * MySQL's retype spelling: {@code MODIFY COLUMN} rather than {@code ALTER COLUMN ... TYPE}. Both produce the
+     * same {@link SchemaOperation.AlterColumnType} - the model only cares that the column's type changed, not which
+     * dialect's syntax said so - so a MySQL branch's DDL validates and replays the same way a Postgres one does.
+     */
+    @Test
+    void parsesModifyColumnAsTheSameAlterColumnTypeMySqlSpells() {
+        SchemaOperation.AlterColumnType operation = (SchemaOperation.AlterColumnType) parser.parse(
+                "ALTER TABLE orders MODIFY COLUMN col1 BIGINT");
+
+        assertEquals("orders", operation.tableName());
+        assertEquals("col1", operation.columnName());
+        assertEquals("BIGINT", operation.newType());
+    }
+
     @Test
     void rejectsAlterColumnVariantsThatAreNotATypeChange() {
         assertThrows(IllegalArgumentException.class, () -> parser.parse("ALTER TABLE orders ALTER COLUMN col1 SET NOT NULL"));
