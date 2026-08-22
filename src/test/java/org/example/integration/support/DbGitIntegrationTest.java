@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -104,6 +105,17 @@ public abstract class DbGitIntegrationTest {
     /** The database a forked branch's DDL actually lands in - what a test looks at to check the fork was real. */
     protected static String databaseOf(String branch) {
         return BranchConnections.forkedDatabaseName(branch);
+    }
+
+    /**
+     * Another caller of the same daemon, with a {@code .dbgit} directory - and so a checked-out branch - of its
+     * own. What a concurrency test uses in place of the shell scripts' {@code new_workspace}/{@code dbgit_in}: the
+     * daemon holds no per-user state, so two workspaces talking to the one running daemon are genuinely
+     * independent callers, not a simulation of them.
+     */
+    protected DbGitCli newWorkspace(String name) throws IOException {
+        Path directory = Files.createDirectory(workspaceDirectory.resolve(name));
+        return cli.otherWorkspace(directory, daemon.port());
     }
 
     private void serve() {

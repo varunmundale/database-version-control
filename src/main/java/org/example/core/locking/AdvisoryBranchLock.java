@@ -47,7 +47,7 @@ public final class AdvisoryBranchLock implements BranchLock {
     }
 
     /** A branch's lock key: stable across processes and restarts, since it is derived from the name alone. */
-    static int keyFor(String branch) {
+    public static int keyFor(String branch) {
         CRC32 digest = new CRC32();
         digest.update(branch.getBytes(StandardCharsets.UTF_8));
         return (int) digest.getValue();
