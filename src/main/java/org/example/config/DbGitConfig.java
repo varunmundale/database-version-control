@@ -2,6 +2,7 @@ package org.example.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,9 +42,35 @@ final class DbGitConfig {
         return value.asInt();
     }
 
+    /**
+     * A section that need not be there at all - an empty object stands in for a missing one, so every field in it
+     * falls back to its default. This is what lets a {@code dbgit.json} written before a section existed keep
+     * working: {@link #section} refuses a missing section, which is right for the ones dbgit cannot run without.
+     */
+    static JsonNode optionalSection(String name) {
+        JsonNode section = ROOT.get(name);
+        return section == null || !section.isObject() ? JsonNodeFactory.instance.objectNode() : section;
+    }
+
     static String optionalText(JsonNode section, String field, String defaultValue) {
         JsonNode value = section.get(field);
         return value == null || value.asText().isBlank() ? defaultValue : value.asText();
+    }
+
+    static int optionalInt(JsonNode section, String field, int defaultValue) {
+        JsonNode value = section.get(field);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (!value.canConvertToInt()) {
+            throw new IllegalStateException("Non-numeric configuration key: " + field);
+        }
+        return value.asInt();
+    }
+
+    static boolean optionalBoolean(JsonNode section, String field, boolean defaultValue) {
+        JsonNode value = section.get(field);
+        return value == null ? defaultValue : value.asBoolean(defaultValue);
     }
 
     private static JsonNode load() {

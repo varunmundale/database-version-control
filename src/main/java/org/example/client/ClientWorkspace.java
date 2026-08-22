@@ -1,9 +1,10 @@
-package org.example.repository;
+package org.example.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.example.config.ConnectionSettings;
+import org.example.protocol.RequestContext;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,30 +13,46 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The local half of dbgit's state, under {@code .dbgit}: a {@code HEAD} file naming the checked-out branch, and a
- * {@code config.json} holding the connections this workspace dials. Which branches exist and what they contain
+ * One user's local {@code .dbgit} directory: a {@code HEAD} file naming the branch they are on, and a
+ * {@code config.json} holding the connection their workspace dials. Which branches exist and what they contain
  * lives in the metadata store instead.
  *
- * <p>{@code config.json} is the <em>only</em> place a password is written. The metadata store records what a branch
- * tracks so any workspace can check it agrees, but never how to authenticate to it - so `.dbgit`, which is local
- * and gitignored, is what holds the credential.
+ * <p>This is client-side on purpose. It used to sit in the daemon, which meant one shared {@code HEAD} for every
+ * user of that daemon - A's {@code checkout} silently moved B. Now each workspace owns its own and tells the
+ * daemon which branch it means, per request.
  *
- * <p>Unlike its siblings in this package it is not a singleton: it is scoped to one working directory, and a
- * process can serve more than one.
+ * <p>{@code config.json} is the only place a password is written. The metadata store records what a branch tracks
+ * so any workspace can check it agrees, but never how to authenticate to it.
  */
-public final class DbGitLocalRepository {
-    private static final String DEFAULT_BRANCH = "main";
-
+public final class ClientWorkspace {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final Path directory;
     private final Path headFile;
     private final Path configFile;
 
-    public DbGitLocalRepository(Path workingDirectory) {
+    public ClientWorkspace(Path workingDirectory) {
         this.directory = Objects.requireNonNull(workingDirectory, "workingDirectory must not be null").resolve(".dbgit");
         this.headFile = directory.resolve("HEAD");
         this.configFile = directory.resolve("config.json");
+    }
+
+    /** What this workspace sends with every request: who is asking, where they are, and how to reach what main tracks. */
+    public RequestContext requestContext() {
+        return new RequestContext(System.getProperty("user.name"), currentBranch(),
+                trackedConnection(RequestContext.DEFAULT_BRANCH).orElse(null));
+    }
+
+    /** The branch this workspace is on, defaulting to {@code main} in a directory dbgit hasn't been used in yet. */
+    public String currentBranch() {
+        initialize();
+        return read().trim();
+    }
+
+    public void checkout(String branch) {
+        Objects.requireNonNull(branch, "branch must not be null");
+        initialize();
+        write(branch);
     }
 
     /** The connection this workspace uses for a branch, or empty if {@code dbgit init} has not configured one. */
@@ -81,7 +98,7 @@ public final class DbGitLocalRepository {
             JsonNode root = JSON.readTree(configFile.toFile());
             return root.isObject() ? (ObjectNode) root : JSON.createObjectNode();
         } catch (IOException exception) {
-            throw new RepositoryException("Could not read '" + configFile + "': " + exception.getMessage(), exception);
+            throw new WorkspaceException("Could not read '" + configFile + "': " + exception.getMessage(), exception);
         }
     }
 
@@ -90,20 +107,8 @@ public final class DbGitLocalRepository {
             Files.writeString(configFile, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root)
                     + System.lineSeparator());
         } catch (IOException exception) {
-            throw new RepositoryException("Could not update '" + configFile + "': " + exception.getMessage(), exception);
+            throw new WorkspaceException("Could not update '" + configFile + "': " + exception.getMessage(), exception);
         }
-    }
-
-    /** The checked-out branch, defaulting to {@code main} in a working directory dbgit hasn't been used in yet. */
-    public String currentBranch() {
-        initialize();
-        return read().trim();
-    }
-
-    public void checkout(String branch) {
-        Objects.requireNonNull(branch, "branch must not be null");
-        initialize();
-        write(branch);
     }
 
     /** Creates {@code .dbgit/HEAD} pointing at the default branch, unless this directory already has one. */
@@ -114,16 +119,16 @@ public final class DbGitLocalRepository {
         try {
             Files.createDirectories(directory);
         } catch (IOException exception) {
-            throw new RepositoryException("Could not create '" + directory + "': " + exception.getMessage(), exception);
+            throw new WorkspaceException("Could not create '" + directory + "': " + exception.getMessage(), exception);
         }
-        write(DEFAULT_BRANCH);
+        write(RequestContext.DEFAULT_BRANCH);
     }
 
     private String read() {
         try {
             return Files.readString(headFile);
         } catch (IOException exception) {
-            throw new RepositoryException("Could not read '" + headFile + "': " + exception.getMessage(), exception);
+            throw new WorkspaceException("Could not read '" + headFile + "': " + exception.getMessage(), exception);
         }
     }
 
@@ -131,7 +136,7 @@ public final class DbGitLocalRepository {
         try {
             Files.writeString(headFile, branch + System.lineSeparator());
         } catch (IOException exception) {
-            throw new RepositoryException("Could not update '" + headFile + "': " + exception.getMessage(), exception);
+            throw new WorkspaceException("Could not update '" + headFile + "': " + exception.getMessage(), exception);
         }
     }
 }

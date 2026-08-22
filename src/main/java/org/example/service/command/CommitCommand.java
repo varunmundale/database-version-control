@@ -29,7 +29,7 @@ public final class CommitCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        String branch = context.repository().currentBranch();
+        String branch = context.branch();
         CommitResult result = committer.commit(branch, parse());
         return switch (result) {
             case CommitResult.NothingToCommit ignored -> print(List.of("Nothing to commit for branch '" + branch + "'."));

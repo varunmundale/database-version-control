@@ -1,48 +1,44 @@
 package org.example.service.command;
 
 import org.example.config.ConnectionSettings;
-import org.example.connectors.SqlConnector;
 import org.example.config.TrackedDatabaseConfig;
+import org.example.connectors.SqlConnector;
+import org.example.protocol.RequestContext;
 import org.example.service.DbGitCommandResult;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
- * {@code dbgit init --host <h> --port <p> --database <d> --user <u> --password <w>} - points {@code main} at a
- * real, already-existing database, so that everything committed on {@code main} is applied there rather than to a
- * throwaway scratchpad.
+ * {@code dbgit init} - points {@code main} at a real, already-existing database, so that everything committed on
+ * {@code main} is applied there rather than to a throwaway scratchpad.
  *
- * <p>The details are split deliberately. The metadata store gets a {@link TrackedDatabaseConfig}: a signature plus host,
- * port, database and user, so any workspace can see what {@code main} is supposed to point at. The password is
- * written only to this workspace's {@code .dbgit/config.json}, which is local and gitignored - initialising a
- * branch never puts a credential anywhere shared.
+ * <p>The connection arrives on the request, parsed and held by the caller's own workspace; the daemon never stores
+ * it. All this command records is a {@link TrackedDatabaseConfig} in the metadata store: a signature plus host,
+ * port, database and user, so any workspace can see what {@code main} is supposed to point at. The password is not
+ * part of that record and has nowhere shared to live.
  *
- * <p>Idempotent: initialising against the same database twice signs the same and simply refreshes the stored
- * connection. Pointing it somewhere else repoints {@code main}, keeping its commit history.
+ * <p>Idempotent: initialising against the same database twice signs the same. Pointing it somewhere else repoints
+ * {@code main}, keeping its commit history.
  */
 public final class InitCommand extends Command {
-    private static final String BRANCH = "main";
-    private static final int DEFAULT_PORT = 5432;
+    private static final String BRANCH = RequestContext.DEFAULT_BRANCH;
 
-    private final List<String> arguments;
-
-    public InitCommand(CommandContext context, List<String> arguments) {
+    public InitCommand(CommandContext context) {
         super(context);
-        this.arguments = List.copyOf(Objects.requireNonNull(arguments, "arguments must not be null"));
     }
 
     @Override
     public DbGitCommandResult execute() {
-        ConnectionSettings settings = parse();
+        ConnectionSettings settings = context.request().trackedDatabaseIfConfigured()
+                .orElseThrow(() -> new IllegalArgumentException("No connection details were sent with 'dbgit init'. "
+                        + "Usage: dbgit init --host <host> [--port 5432] --database <database> --user <user>"
+                        + " [--password <password>]"));
         verifyReachable(settings);
 
         Optional<TrackedDatabaseConfig> previous = context.versioningService().trackedDatabase(BRANCH);
         TrackedDatabaseConfig tracked = context.versioningService().track(BRANCH, settings);
-        context.repository().track(BRANCH, settings);
 
         return print(List.of(describe(previous, tracked), "Signature: " + tracked.signature() + "."));
     }
@@ -67,45 +63,5 @@ public final class InitCommand extends Command {
                     + ":" + settings.port() + " as '" + settings.user() + "': " + exception.getMessage()
                     + ". Nothing was recorded.", exception);
         }
-    }
-
-    private ConnectionSettings parse() {
-        String host = null;
-        String database = null;
-        String user = null;
-        String password = "";
-        int port = DEFAULT_PORT;
-
-        List<String> unknown = new ArrayList<>();
-        for (int index = 0; index < arguments.size(); index++) {
-            String flag = arguments.get(index);
-            switch (flag) {
-                case "--host" -> host = value(flag, ++index);
-                case "--port" -> port = Integer.parseInt(value(flag, ++index));
-                case "--database" -> database = value(flag, ++index);
-                case "--user" -> user = value(flag, ++index);
-                case "--password" -> password = value(flag, ++index);
-                default -> unknown.add(flag);
-            }
-        }
-        if (!unknown.isEmpty()) {
-            throw new IllegalArgumentException("Unknown option(s) " + unknown + ". " + usage());
-        }
-        if (host == null || database == null || user == null) {
-            throw new IllegalArgumentException("--host, --database and --user are all required. " + usage());
-        }
-        return new ConnectionSettings(host, port, user, password, database);
-    }
-
-    private String value(String flag, int index) {
-        if (index >= arguments.size()) {
-            throw new IllegalArgumentException(flag + " needs a value. " + usage());
-        }
-        return arguments.get(index);
-    }
-
-    private static String usage() {
-        return "Usage: dbgit init --host <host> [--port " + DEFAULT_PORT
-                + "] --database <database> --user <user> [--password <password>]";
     }
 }

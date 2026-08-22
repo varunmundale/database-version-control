@@ -6,6 +6,7 @@ import org.example.core.differ.TableDiff;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
+import org.example.protocol.RequestContext;
 import org.example.models.schema.TableModel;
 import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.CommitMetadata;
@@ -42,7 +43,8 @@ public final class Merger {
         this.databaseDiff = Objects.requireNonNull(databaseDiff, "databaseDiff must not be null");
     }
 
-    public MergeResult merge(String currentBranch, String otherBranch) {
+    public MergeResult merge(RequestContext request, String otherBranch) {
+        String currentBranch = request.branch();
         VersioningService versioningService = forker.versioningService();
         List<ChangeSet> currentHistory = versioningService.commitHistory(currentBranch);
         List<ChangeSet> otherHistory = versioningService.commitHistory(otherBranch);
@@ -60,9 +62,9 @@ public final class Merger {
 
         String stagingBranch = stagingBranchName(currentBranch, otherBranch);
         forker.fork(currentBranch, stagingBranch);
-        forker.branchDatabases().replay(connections.forBranch(stagingBranch), otherOnly);
+        forker.branchDatabases().replay(connections.forBranch(request, stagingBranch), otherOnly);
 
-        forker.branchDatabases().replay(connections.forBranch(currentBranch), otherOnly);
+        forker.branchDatabases().replay(connections.forBranch(request, currentBranch), otherOnly);
 
         long commitId = versioningService.createMergeCommit(currentBranch, otherBranch,
                 CommitMetadata.by(null, "Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));

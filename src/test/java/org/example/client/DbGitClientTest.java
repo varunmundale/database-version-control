@@ -16,6 +16,7 @@ import org.example.models.versioning.CommitEntry;
 import org.example.models.versioning.Commit;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.service.DbGitCommandListener;
+import org.example.protocol.RequestContext;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,10 +54,10 @@ class DbGitClientTest {
     @BeforeEach
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        listener = new DbGitCommandListener(workingDirectory,
+        listener = new DbGitCommandListener(
                 new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
         // main tracks a real database now, so point it at one before any request arrives.
-        listener.execute("dbgit init --host localhost --port 5432 --database app --user tester");
+        listener.execute(request(), "dbgit init");
         serverThread = new Thread(() -> {
             try {
                 listener.serve();
@@ -79,7 +80,7 @@ class DbGitClientTest {
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
 
-        int exitCode = client.run(List.of("checkout", "-b", "feature/orders"), printStream(outBytes), printStream(errBytes));
+        int exitCode = client.run(request(), List.of("checkout", "-b", "feature/orders"), printStream(outBytes), printStream(errBytes));
 
         assertEquals(0, exitCode);
         assertEquals("Switched to a new branch 'feature/orders'." + System.lineSeparator(), outBytes.toString(StandardCharsets.UTF_8));
@@ -92,7 +93,7 @@ class DbGitClientTest {
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
 
-        int exitCode = client.run(List.of("checkout", "unknown-branch"), printStream(outBytes), printStream(errBytes));
+        int exitCode = client.run(request(), List.of("checkout", "unknown-branch"), printStream(outBytes), printStream(errBytes));
 
         assertEquals(1, exitCode);
         assertEquals("", outBytes.toString(StandardCharsets.UTF_8));
@@ -109,7 +110,7 @@ class DbGitClientTest {
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
 
-        int exitCode = client.run(List.of("branch"), printStream(outBytes), printStream(errBytes));
+        int exitCode = client.run(request(), List.of("branch"), printStream(outBytes), printStream(errBytes));
 
         assertEquals(1, exitCode);
         assertTrue(errBytes.toString(StandardCharsets.UTF_8).contains("dbService is not running"));
@@ -121,12 +122,18 @@ class DbGitClientTest {
         ByteArrayOutputStream outBytes = new ByteArrayOutputStream();
         ByteArrayOutputStream errBytes = new ByteArrayOutputStream();
 
-        int exitCode = client.runAdd("CREATE TABLE orders (\n  id INT NOT NULL\n);", printStream(outBytes), printStream(errBytes));
+        int exitCode = client.runAdd(request(), "CREATE TABLE orders (\n  id INT NOT NULL\n);", printStream(outBytes), printStream(errBytes));
 
         assertEquals(0, exitCode);
         assertEquals("Applied changeset #1 for branch 'main': table 'orders' now has 1 column(s)." + System.lineSeparator(),
                 outBytes.toString(StandardCharsets.UTF_8));
         assertEquals("", errBytes.toString(StandardCharsets.UTF_8));
+    }
+
+    /** What a client workspace would send: this caller, on main, with the connection it has configured. */
+    private static RequestContext request() {
+        return new RequestContext("tester", RequestContext.DEFAULT_BRANCH,
+                new ConnectionSettings("localhost", 5432, "tester", "", "app"));
     }
 
     private static PrintStream printStream(ByteArrayOutputStream bytes) {

@@ -28,8 +28,8 @@ public final class AddCommand extends Command {
             throw new IllegalArgumentException("Usage: dbgit add <DDL statement>");
         }
 
-        String branch = context.repository().currentBranch();
-        StageResult result = stager.stage(branch, statement);
+        String branch = context.branch();
+        StageResult result = stager.stage(context.request(), statement);
         return print(List.of("Applied changeset #" + result.changesetId() + " for branch '" + branch + "': table '"
                 + result.tableName() + "' now has " + result.columnCount() + " column(s)."));
     }

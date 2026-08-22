@@ -24,7 +24,7 @@ public final class MergeCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        String currentBranch = context.repository().currentBranch();
+        String currentBranch = context.branch();
         VersioningService versioningService = context.versioningService();
         if (!versioningService.branches().contains(otherBranch)) {
             throw new IllegalArgumentException("Unknown branch: " + otherBranch);
@@ -33,7 +33,7 @@ public final class MergeCommand extends Command {
             throw new IllegalArgumentException("Cannot merge branch '" + currentBranch + "' into itself.");
         }
 
-        MergeResult result = merger.merge(currentBranch, otherBranch);
+        MergeResult result = merger.merge(context.request(), otherBranch);
         return switch (result) {
             case MergeResult.AlreadyUpToDate ignored -> print(List.of("Already up to date."));
             case MergeResult.Conflict conflict -> throw new IllegalStateException("Cannot merge '" + otherBranch + "' into '"

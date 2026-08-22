@@ -40,6 +40,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import org.example.config.ConcurrencyConfig;
+import org.example.protocol.RequestContext;
+import org.example.protocol.RequestHeader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,13 +60,17 @@ class DbGitCommandListenerTest {
     private DbGitCommandListener listener;
     private Thread serverThread;
 
+    /** What a client would keep in its own .dbgit workspace, and send with every request. */
+    private final ConnectionSettings tracked = new ConnectionSettings("localhost", 5432, "tester", "", "app");
+    private String branch = RequestContext.DEFAULT_BRANCH;
+
     @BeforeEach
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        listener = new DbGitCommandListener(workingDirectory,
+        listener = new DbGitCommandListener(
                 new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
         // main tracks a real database now, so point it at one before any request arrives.
-        listener.execute("dbgit init --host localhost --port 5432 --database app --user tester");
+        listener.execute(new RequestContext("tester", branch, tracked), "dbgit init");
         serverThread = new Thread(() -> {
             try {
                 listener.serve();
@@ -79,12 +92,16 @@ class DbGitCommandListenerTest {
         Response createResponse = send("dbgit checkout -b feature/orders");
         assertEquals("OK", createResponse.status);
         assertEquals(List.of("Switched to a new branch 'feature/orders'."), createResponse.body);
-        assertEquals("feature/orders", Files.readString(workingDirectory.resolve(".dbgit/HEAD")).trim());
+
+        // The daemon keeps no HEAD; the client moves its own once the daemon has accepted the checkout.
+        branch = "feature/orders";
+        assertEquals(List.of("* feature/orders", "  main"), send("dbgit branch").body);
 
         Response checkoutResponse = send("dbgit checkout main");
         assertEquals("OK", checkoutResponse.status);
         assertEquals(List.of("Switched to branch 'main'."), checkoutResponse.body);
 
+        branch = RequestContext.DEFAULT_BRANCH;
         Response branchResponse = send("dbgit branch");
         assertEquals("OK", branchResponse.status);
         assertEquals(List.of("  feature/orders", "* main"), branchResponse.body);
@@ -109,6 +126,7 @@ class DbGitCommandListenerTest {
     private Response send(String commandLine) throws IOException {
         try (Socket socket = new Socket("localhost", listener.port())) {
             try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println(header());
                 writer.println(commandLine);
                 socket.shutdownOutput();
 
@@ -120,6 +138,7 @@ class DbGitCommandListenerTest {
     private Response sendAdd(String ddl) throws IOException {
         try (Socket socket = new Socket("localhost", listener.port())) {
             try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println(header());
                 writer.println("dbgit add");
                 writer.print(ddl);
                 writer.flush();
@@ -128,6 +147,142 @@ class DbGitCommandListenerTest {
                 return readResponse(socket);
             }
         }
+    }
+
+    /**
+     * If the daemon were still serial the barrier would never trip and this would time out - which is the point:
+     * it proves the handlers really do overlap, rather than merely that three requests eventually succeeded.
+     */
+    @Test
+    void concurrentClientsAreHandledInParallel() throws Exception {
+        int clients = 3;
+        CyclicBarrier allInside = new CyclicBarrier(clients);
+        try (Daemon daemon = daemon(new ConcurrencyConfig(clients, 8, 5000, 5000, 60000), () -> {
+            try {
+                allInside.await(5, TimeUnit.SECONDS);
+            } catch (Exception exception) {
+                throw new IllegalStateException("handlers did not overlap", exception);
+            }
+        })) {
+            List<Response> responses = daemon.inParallel(clients);
+
+            assertEquals(clients, responses.stream().filter(response -> response.status.equals("OK")).count(),
+                    responses.toString());
+        }
+    }
+
+    /**
+     * One handler, a queue of one: the third and fourth callers cannot be served at all. They are told so, rather
+     * than being dropped or left queued behind work that has not started.
+     */
+    @Test
+    void whenEveryHandlerAndTheQueueAreFullTheRestAreToldTheServerIsBusy() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        try (Daemon daemon = daemon(new ConcurrencyConfig(1, 1, 5000, 5000, 60000), () -> {
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+        })) {
+            List<Response> responses = daemon.inParallel(4, release::countDown);
+
+            long busy = responses.stream()
+                    .filter(response -> "ERR".equals(response.status)
+                            && response.body.getFirst().contains("Server busy"))
+                    .count();
+            assertEquals(2, busy, "one handler plus a queue of one leaves two callers unserved: " + responses);
+            assertTrue(responses.stream().allMatch(response -> response.status != null),
+                    "no connection should be answered with nothing at all");
+        }
+    }
+
+    /** A daemon of its own, so a test can choose its thread count without disturbing the shared one. */
+    private Daemon daemon(ConcurrencyConfig concurrency, Runnable gate) throws IOException {
+        ConnectorFactory connectors = settings -> new SqlConnector() {
+            @Override
+            public SqlExecutionResult execute(String sql) {
+                gate.run();
+                return new SqlExecutionResult(false, 0, List.of());
+            }
+
+            @Override
+            public <T> T transaction(SqlTransaction<T> work) throws java.sql.SQLException {
+                return work.execute(this);
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        DbGitCommandListener owned = new DbGitCommandListener(
+                new Forker(new RecordingRunner(), connectors, new InMemoryMetadataStore()), 0, concurrency);
+        // Reaches the database only to connect, never to execute, so the gate does not hold up start-up.
+        owned.execute(new RequestContext("tester", RequestContext.DEFAULT_BRANCH, tracked), "dbgit init");
+        Thread thread = new Thread(() -> {
+            try {
+                owned.serve();
+            } catch (IOException ignored) {
+                // Expected once close() shuts the socket down.
+            }
+        });
+        thread.start();
+        return new Daemon(owned, thread);
+    }
+
+    private final class Daemon implements AutoCloseable {
+        private final DbGitCommandListener owned;
+        private final Thread thread;
+
+        private Daemon(DbGitCommandListener owned, Thread thread) {
+            this.owned = owned;
+            this.thread = thread;
+        }
+
+        /** Fires {@code clients} concurrent {@code dbgit add}s, running {@code afterSubmitting} once all are in flight. */
+        List<Response> inParallel(int clients, Runnable... afterSubmitting) throws Exception {
+            ExecutorService pool = Executors.newFixedThreadPool(clients);
+            try {
+                List<Future<Response>> pending = new ArrayList<>();
+                for (int client = 0; client < clients; client++) {
+                    pending.add(pool.submit(() -> sendTo(owned.port(), "CREATE TABLE orders (id INT NOT NULL);")));
+                    Thread.sleep(120);
+                }
+                for (Runnable release : afterSubmitting) {
+                    release.run();
+                }
+                List<Response> responses = new ArrayList<>();
+                for (Future<Response> response : pending) {
+                    responses.add(response.get(15, TimeUnit.SECONDS));
+                }
+                return responses;
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            owned.close();
+            thread.join();
+        }
+    }
+
+    private Response sendTo(int port, String ddl) throws IOException {
+        try (Socket socket = new Socket("localhost", port)) {
+            try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
+                writer.println(header());
+                writer.println("dbgit add");
+                writer.print(ddl);
+                writer.flush();
+                socket.shutdownOutput();
+                return readResponse(socket);
+            }
+        }
+    }
+
+    private String header() {
+        return RequestHeader.render(new RequestContext("tester", branch, tracked));
     }
 
     private static Response readResponse(Socket socket) throws IOException {

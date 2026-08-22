@@ -1,6 +1,8 @@
 package org.example.client;
 
 import org.example.config.ServiceEndpointConfig;
+import org.example.protocol.RequestContext;
+import org.example.protocol.RequestHeader;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -24,19 +26,25 @@ public final class DbGitClient {
         this.port = port;
     }
 
-    public int run(List<String> args, PrintStream out, PrintStream err) {
+    /**
+     * Every request opens with a {@link RequestHeader}: the daemon holds no per-user state, so who is asking, which
+     * branch they are on and how to reach the tracked database all travel with the command.
+     */
+    public int run(RequestContext request, List<String> args, PrintStream out, PrintStream err) {
         String commandLine = "dbgit " + String.join(" ", args);
         return send(socket -> {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            writer.println(RequestHeader.render(request));
             writer.println(commandLine);
             socket.shutdownOutput();
         }, out, err);
     }
 
     /** Sends a {@code dbgit add} DDL statement, which may span multiple lines. */
-    public int runAdd(String ddl, PrintStream out, PrintStream err) {
+    public int runAdd(RequestContext request, String ddl, PrintStream out, PrintStream err) {
         return send(socket -> {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            writer.println(RequestHeader.render(request));
             writer.println("dbgit add");
             writer.print(ddl);
             writer.flush();

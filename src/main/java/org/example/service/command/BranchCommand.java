@@ -13,7 +13,7 @@ public final class BranchCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        String currentBranch = context.repository().currentBranch();
+        String currentBranch = context.branch();
         List<String> lines = new ArrayList<>();
         for (String branch : context.versioningService().branches()) {
             lines.add((branch.equals(currentBranch) ? "* " : "  ") + branch);

@@ -3,6 +3,7 @@ package org.example.core.stager;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
+import org.example.protocol.RequestContext;
 import org.example.models.schema.TableModel;
 import org.example.core.versioning.VersioningService;
 
@@ -27,7 +28,8 @@ public final class Stager {
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
     }
 
-    public StageResult stage(String branch, String statement) {
+    public StageResult stage(RequestContext request, String statement) {
+        String branch = request.branch();
         VersioningService versioningService = forker.versioningService();
 
         String tableName = replayer.tableName(statement);
@@ -36,7 +38,7 @@ public final class Stager {
 
         long changesetId = versioningService.stageChangeset(branch, statement);
 
-        forker.branchDatabases().apply(connections.forBranch(branch), statement);
+        forker.branchDatabases().apply(connections.forBranch(request, branch), statement);
 
         versioningService.markApplied(changesetId);
         return new StageResult(changesetId, updated.name(), updated.columns().size());

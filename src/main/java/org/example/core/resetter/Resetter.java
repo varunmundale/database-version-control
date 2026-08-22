@@ -3,6 +3,7 @@ package org.example.core.resetter;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
 import org.example.core.replayer.Replayer;
+import org.example.protocol.RequestContext;
 import org.example.core.versioning.VersioningService;
 import org.example.models.schema.TableModel;
 import org.example.models.versioning.ChangeSet;
@@ -40,7 +41,8 @@ public final class Resetter {
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
     }
 
-    public ResetResult reset(String branch, long commitId) {
+    public ResetResult reset(RequestContext request, long commitId) {
+        String branch = request.branch();
         if (branch.equals(DEFAULT_BRANCH)) {
             throw new IllegalStateException("Cannot reset branch 'main': it tracks a real database rather than a"
                     + " scratchpad fork, and resetting rebuilds a branch's database from scratch. Reset a forked"
@@ -58,7 +60,7 @@ public final class Resetter {
         String database = BranchConnections.forkedDatabaseName(branch);
         forker.branchDatabases().dropDatabase(database);
         forker.branchDatabases().createDatabase(database);
-        forker.branchDatabases().replay(connections.forBranch(branch), history);
+        forker.branchDatabases().replay(connections.forBranch(request, branch), history);
 
         return new ResetResult(branch, commitId, dropped, history.size(), schema.size());
     }

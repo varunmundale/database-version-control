@@ -37,6 +37,7 @@ import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,14 +50,18 @@ class DbGitCommandsTest {
 
     private final List<DbGitCommandListener> listeners = new ArrayList<>();
 
-    /** Each test drives the daemon directly rather than over a socket; the bound port is closed again in teardown. */
-    private DbGitCommandListener listener(Forker forker) {
+    /**
+     * Each test drives the daemon directly rather than over a socket, through a {@link DaemonSession} standing in
+     * for the client - the daemon keeps no current branch of its own, so someone has to hold one.
+     */
+    private DaemonSession listener(Forker forker) {
         try {
-            DbGitCommandListener listener = new DbGitCommandListener(workingDirectory, forker, 0);
+            DbGitCommandListener listener = new DbGitCommandListener(forker, 0);
             listeners.add(listener);
+            DaemonSession session = new DaemonSession(listener, "tester");
             // main tracks a real database now, so point it at one before any test touches it.
-            listener.execute("dbgit init --host localhost --port 5432 --database " + MAIN_DATABASE + " --user tester");
-            return listener;
+            session.execute("dbgit init --host localhost --port 5432 --database " + MAIN_DATABASE + " --user tester");
+            return session;
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
         }
@@ -73,12 +78,13 @@ class DbGitCommandsTest {
     void createsABranchDatabaseAndWritesLocalDbGitState() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), metadataStore));
 
         DbGitCommandResult result = dbgit.execute("dbgit checkout -b feature/orders");
 
         assertEquals(List.of("Switched to a new branch 'feature/orders'."), result.lines());
-        assertEquals("feature/orders", Files.readString(workingDirectory.resolve(".dbgit/HEAD")).trim());
+        // HEAD is the caller's now, not a file the daemon owns - the session tracks it the way the client does.
+        assertEquals("feature/orders", dbgit.branch());
         assertEquals(List.of("feature/orders", "main"), metadataStore.branches());
         assertEquals(1, runner.commands.size());
     }
@@ -86,7 +92,7 @@ class DbGitCommandsTest {
     @Test
     void checksOutExistingBranchesAndListsAllBranches() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
-        DbGitCommandListener dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()));
         dbgit.execute("dbgit checkout -b feature/orders");
 
         DbGitCommandResult checkout = dbgit.execute("dbgit checkout main");
@@ -101,7 +107,7 @@ class DbGitCommandsTest {
     void addsACreateTableStatementBuildsTheInternalRepresentationAndAppliesTheChangeset() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
         String ddl = "CREATE TABLE orders (\n  id INT NOT NULL,\n  name TEXT\n);";
 
         DbGitCommandResult result = dbgit.add(ddl);
@@ -119,7 +125,7 @@ class DbGitCommandsTest {
     void appliesAnAlterStatementOnTopOfThePreviouslyAppliedInternalRepresentation() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         String alter = "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;";
 
@@ -134,7 +140,7 @@ class DbGitCommandsTest {
     void refusesToAlterAnUnknownTableWithoutTouchingTheDatabaseOrTheServer() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), connectorFactory, metadataStore));
 
         assertThrows(IllegalArgumentException.class, () -> dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC;"));
 
@@ -145,7 +151,7 @@ class DbGitCommandsTest {
     @Test
     void commitsAllAppliedChangesetsIntoOneCommitWithForwardAndBackwardPointers() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2) NOT NULL;");
 
@@ -161,7 +167,7 @@ class DbGitCommandsTest {
 
     @Test
     void reportsNothingToCommitWhenNoChangesetsAreApplied() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         DbGitCommandResult result = dbgit.execute("dbgit commit");
 
@@ -171,7 +177,7 @@ class DbGitCommandsTest {
     @Test
     void onlyAppliedChangesetsAreEverCommittedTwice() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
 
@@ -184,7 +190,7 @@ class DbGitCommandsTest {
     void reportsNoDifferencesWhenBranchesShareTheSameCommittedSchema() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -198,7 +204,7 @@ class DbGitCommandsTest {
     void diffPrintsATreeBringingBothSidesConflictingStatementsTogetherUnderTheConflictingColumn() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -226,7 +232,7 @@ class DbGitCommandsTest {
     void renamingAColumnOnOneBranchWhileTheOtherModifiesItIsFlaggedAsAConflict() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -247,7 +253,7 @@ class DbGitCommandsTest {
 
     @Test
     void refusesToDiffAnUnknownBranch() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
                 () -> dbgit.execute("dbgit diff main unknown-branch"));
@@ -260,7 +266,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -301,7 +307,7 @@ class DbGitCommandsTest {
     void mergeRejectsWhenBothBranchesConflictOnTheSameColumn() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -326,7 +332,7 @@ class DbGitCommandsTest {
     void mergeReportsAlreadyUpToDateWhenTheOtherBranchHasNothingNew() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -340,7 +346,7 @@ class DbGitCommandsTest {
 
     @Test
     void mergeRefusesAnUnknownBranch() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
                 () -> dbgit.execute("dbgit merge unknown-branch"));
@@ -350,7 +356,7 @@ class DbGitCommandsTest {
 
     @Test
     void mergeRefusesMergingABranchIntoItself() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
                 () -> dbgit.execute("dbgit merge main"));
@@ -362,7 +368,7 @@ class DbGitCommandsTest {
     void forkedBranchesSharePriorCommitHistoryWithoutCreatingNewCommits() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit");
 
@@ -377,7 +383,7 @@ class DbGitCommandsTest {
     @Test
     void logShowsEachCommitsIdAuthorDateMessageAndChangesetsNewestFirst() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m create the orders table --author ada");
         dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
@@ -410,7 +416,7 @@ class DbGitCommandsTest {
     @Test
     void logListsUncommittedChangesetsAsTheWorkingSetAboveTheCommits() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m first");
         dbgit.add("ALTER TABLE orders ADD COLUMN note TEXT;");
@@ -427,7 +433,7 @@ class DbGitCommandsTest {
     @Test
     void logCollapsesMultiLineDdlAndSaysSoWhenABranchHasNoCommits() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
 
         assertEquals(List.of("Branch 'main'", "", "Working set: clean.", "No commits on branch 'main' yet."),
                 dbgit.execute("dbgit log").lines());
@@ -442,7 +448,7 @@ class DbGitCommandsTest {
     @Test
     void commitDefaultsTheAuthorToWhoeverTheDaemonRunsAsAndAcceptsAnEmptyMessage() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
 
         dbgit.execute("dbgit commit");
@@ -457,7 +463,7 @@ class DbGitCommandsTest {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         MultiRecordingConnectorFactory connectorFactory = new MultiRecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, connectorFactory, metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m first table");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -491,7 +497,7 @@ class DbGitCommandsTest {
     void resetLeavesTheOtherBranchesSharingThoseCommitsAlone() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"), new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m first table");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -506,7 +512,7 @@ class DbGitCommandsTest {
 
     @Test
     void resetRefusesMainBecauseItTracksARealDatabase() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
 
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> dbgit.execute("dbgit reset 1"));
@@ -518,7 +524,7 @@ class DbGitCommandsTest {
     void resetRefusesACommitThatIsNotInTheBranchsHistory() {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
-        DbGitCommandListener dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
+        DaemonSession dbgit = listener(new Forker(runner, new MultiRecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m first table");
         dbgit.execute("dbgit checkout -b feature/orders");
@@ -532,7 +538,7 @@ class DbGitCommandsTest {
 
     @Test
     void resetRefusesSomethingThatIsNotACommitId() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -768,7 +774,7 @@ class DbGitCommandsTest {
 
     @Test
     void initRecordsWhatMainTracksAndSaysSo() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
 
         DbGitCommandResult result = dbgit.execute(
@@ -780,7 +786,7 @@ class DbGitCommandsTest {
 
     @Test
     void initIsIdempotentForTheSameDatabase() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
         String command = "dbgit init --host db.internal --port 6543 --database app_prod --user dbgit";
 
@@ -793,7 +799,7 @@ class DbGitCommandsTest {
 
     @Test
     void initRepointsMainAtADifferentDatabase() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
         dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
 
@@ -804,22 +810,25 @@ class DbGitCommandsTest {
         assertTrue(repointed.lines().getFirst().contains("was app_prod@db.internal:6543"), repointed.lines().toString());
     }
 
+    /** The password reaches the daemon on the request and is used, but the daemon has nowhere to keep it. */
     @Test
-    void initWritesCredentialsOnlyToTheLocalWorkspace() throws IOException {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
-                new InMemoryMetadataStore()));
+    void initRecordsWhatMainTracksWithoutTheCredentialItWasGiven() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+                metadataStore));
 
         dbgit.execute("dbgit init --host db.internal --database app_prod --user dbgit --password hunter2");
 
-        String localConfig = Files.readString(workingDirectory.resolve(".dbgit/config.json"));
-        assertTrue(localConfig.contains("hunter2"), "the password belongs in local .dbgit state");
-        assertTrue(localConfig.contains("app_prod"), localConfig);
+        TrackedDatabaseConfig tracked = metadataStore.trackedDatabase("main").orElseThrow();
+        assertTrue(tracked.describe().contains("app_prod@db.internal"), tracked.describe());
+        assertFalse(tracked.toString().contains("hunter2"),
+                "the shared metadata record has no column for a password");
     }
 
     @Test
     void mainsDdlGoesToTheTrackedDatabaseRatherThanTheScratchpad() {
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), connectorFactory,
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), connectorFactory,
                 new InMemoryMetadataStore()));
         dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
 
@@ -830,7 +839,7 @@ class DbGitCommandsTest {
 
     @Test
     void initRejectsMissingConnectionDetails() {
-        DbGitCommandListener dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,

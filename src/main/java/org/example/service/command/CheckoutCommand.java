@@ -33,7 +33,6 @@ public final class CheckoutCommand extends Command {
         if (!context.versioningService().branches().contains(branch)) {
             throw new IllegalArgumentException("Unknown branch: " + branch);
         }
-        context.repository().checkout(branch);
         return print(List.of("Switched to branch '" + branch + "'."));
     }
 }

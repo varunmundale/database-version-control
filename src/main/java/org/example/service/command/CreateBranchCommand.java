@@ -16,9 +16,7 @@ public final class CreateBranchCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        String fromBranch = context.repository().currentBranch();
-        context.forker().fork(fromBranch, branch);
-        context.repository().checkout(branch);
+        context.forker().fork(context.branch(), branch);
         return print(List.of("Switched to a new branch '" + branch + "'."));
     }
 }

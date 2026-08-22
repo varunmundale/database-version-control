@@ -24,8 +24,8 @@ public final class ResetCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        String branch = context.repository().currentBranch();
-        ResetResult result = resetter.reset(branch, commitId());
+        String branch = context.branch();
+        ResetResult result = resetter.reset(context.request(), commitId());
         return print(List.of(
                 "Branch '" + branch + "' reset to commit #" + result.commitId() + ".",
                 "Dropped " + result.droppedChangesets() + " working changeset(s); replayed "

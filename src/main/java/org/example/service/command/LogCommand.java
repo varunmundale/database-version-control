@@ -19,6 +19,6 @@ public final class LogCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        return print(formatter.format(historyLog.of(context.repository().currentBranch())));
+        return print(formatter.format(historyLog.of(context.branch())));
     }
 }

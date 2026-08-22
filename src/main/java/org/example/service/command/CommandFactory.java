@@ -1,11 +1,16 @@
 package org.example.service.command;
 
+import org.example.protocol.RequestContext;
+
 import java.util.List;
 import java.util.Objects;
 
 /**
  * Turns a raw {@code dbgit} command line's arguments into the matching {@link Command}. Owns command dispatch (the
  * shape each subcommand's argument list takes); each command's own behavior lives in its {@link Command} subclass.
+ *
+ * <p>Holds the daemon's shared collaborators and binds them to one caller's {@link RequestContext} per command, so
+ * two clients can be served from the same factory without sharing a branch.
  */
 public final class CommandFactory {
     private final CommandContext context;
@@ -14,9 +19,10 @@ public final class CommandFactory {
         this.context = Objects.requireNonNull(context, "context must not be null");
     }
 
-    public Command create(List<String> arguments) {
+    public Command create(RequestContext request, List<String> arguments) {
+        CommandContext context = this.context.forRequest(Objects.requireNonNull(request, "request must not be null"));
         if (arguments.size() >= 2 && arguments.get(0).equals("dbgit") && arguments.get(1).equals("init")) {
-            return new InitCommand(context, arguments.subList(2, arguments.size()));
+            return new InitCommand(context);
         }
         if (arguments.equals(List.of("dbgit", "branch"))) {
             return new BranchCommand(context);
