@@ -64,6 +64,16 @@ public final class MetadataVersioningService implements VersioningService {
     }
 
     @Override
+    public void deleteBranch(String branch) {
+        database.execute(() -> branchRepository.delete(branch));
+    }
+
+    @Override
+    public void discardChangeset(long changesetId) {
+        database.execute(() -> changesetRepository.delete(changesetId));
+    }
+
+    @Override
     public long stageChangeset(String branch, String ddl) {
         return database.query(() -> changesetRepository.insertPending(branch, ddl));
     }
@@ -80,7 +90,7 @@ public final class MetadataVersioningService implements VersioningService {
 
     @Override
     public List<CommitEntry> commits(String branch) {
-        return database.query(() -> {
+        return database.snapshot("Could not read the history of branch '" + branch + "'", () -> {
             Long headCommitId = branchRepository.findHeadCommitId(branch);
             if (headCommitId == null) {
                 return List.<CommitEntry>of();
@@ -106,10 +116,7 @@ public final class MetadataVersioningService implements VersioningService {
         return database.transaction("Could not commit branch '" + branch + "'", () -> {
             Long headCommitId = branchRepository.findHeadCommitId(branch);
             long commitId = commitRepository.insert(headCommitId, null, metadata);
-            if (headCommitId != null) {
-                commitRepository.updateNextCommitId(headCommitId, commitId);
-            }
-            branchRepository.updateHeadCommitId(branch, commitId);
+            moveHead(branch, headCommitId, commitId);
             changesetRepository.markCommitted(changesetIds, commitId);
             return commitId;
         });
@@ -124,11 +131,7 @@ public final class MetadataVersioningService implements VersioningService {
                 throw new VersioningException("Branch '" + otherBranch + "' has no commits to merge.");
             }
             long commitId = commitRepository.insert(firstParent, secondParent, metadata);
-            if (firstParent != null) {
-                commitRepository.updateNextCommitId(firstParent, commitId);
-            }
-            commitRepository.updateNextCommitId(secondParent, commitId);
-            branchRepository.updateHeadCommitId(branch, commitId);
+            moveHead(branch, firstParent, commitId);
             return commitId;
         });
     }
@@ -148,9 +151,21 @@ public final class MetadataVersioningService implements VersioningService {
                 throw new VersioningException(
                         "Commit #" + commitId + " is not in branch '" + branch + "' history.");
             }
-            branchRepository.updateHeadCommitId(branch, commitId);
+            moveHead(branch, headCommitId, commitId);
             return changesetRepository.deleteUncommitted(branch);
         });
+    }
+
+    /**
+     * Moves a branch's HEAD, refusing if it is no longer where this operation read it. A branch lock makes that
+     * impossible in normal running; this is what turns a lock that was somehow missed into an error the caller
+     * sees, rather than a commit that silently becomes unreachable.
+     */
+    private void moveHead(String branch, Long expectedHeadCommitId, long commitId) {
+        if (branchRepository.updateHeadCommitId(branch, expectedHeadCommitId, commitId) == 0) {
+            throw new VersioningException("Branch '" + branch + "' moved concurrently; nothing was changed."
+                    + " Re-read its history and try again.");
+        }
     }
 
     private static List<Long> ancestryOrder(long headCommitId, Map<Long, Commit> commitsById) {

@@ -3,6 +3,7 @@ package org.example.service.command;
 import org.example.config.ConnectionSettings;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.connectors.SqlConnector;
+import org.example.core.locking.BranchLease;
 import org.example.protocol.RequestContext;
 import org.example.service.DbGitCommandResult;
 
@@ -37,10 +38,12 @@ public final class InitCommand extends Command {
                         + " [--password <password>]"));
         verifyReachable(settings);
 
-        Optional<TrackedDatabaseConfig> previous = context.versioningService().trackedDatabase(BRANCH);
-        TrackedDatabaseConfig tracked = context.versioningService().track(BRANCH, settings);
+        try (BranchLease ignored = context.locks().acquire(BRANCH)) {
+            Optional<TrackedDatabaseConfig> previous = context.versioningService().trackedDatabase(BRANCH);
+            TrackedDatabaseConfig tracked = context.versioningService().track(BRANCH, settings);
 
-        return print(List.of(describe(previous, tracked), "Signature: " + tracked.signature() + "."));
+            return print(List.of(describe(previous, tracked), "Signature: " + tracked.signature() + "."));
+        }
     }
 
     private static String describe(Optional<TrackedDatabaseConfig> previous, TrackedDatabaseConfig tracked) {

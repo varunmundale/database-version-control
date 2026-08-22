@@ -1,6 +1,8 @@
 package org.example.core.committer;
 
 import org.example.models.versioning.ChangeSet;
+import org.example.core.locking.BranchLease;
+import org.example.core.locking.BranchLocks;
 import org.example.models.versioning.CommitMetadata;
 import org.example.core.versioning.VersioningService;
 
@@ -10,12 +12,25 @@ import java.util.Objects;
 /** Folds a branch's currently APPLIED changesets into one new commit, chained after its current HEAD. */
 public final class Committer {
     private final VersioningService versioningService;
+    private final BranchLocks locks;
 
-    public Committer(VersioningService versioningService) {
+    public Committer(VersioningService versioningService, BranchLocks locks) {
         this.versioningService = Objects.requireNonNull(versioningService, "versioningService must not be null");
+        this.locks = Objects.requireNonNull(locks, "locks must not be null");
     }
 
+    /**
+     * Under the branch's lock, because reading which changesets are applied and folding them into a commit are
+     * two transactions: without it a changeset staged in between is silently dropped from the commit that
+     * claims it, and the count reported to the user is wrong.
+     */
     public CommitResult commit(String branch, CommitMetadata metadata) {
+        try (BranchLease ignored = locks.acquire(branch)) {
+            return committed(branch, metadata);
+        }
+    }
+
+    private CommitResult committed(String branch, CommitMetadata metadata) {
         List<Long> appliedChangesetIds = versioningService.appliedChangesets(branch).stream()
                 .map(ChangeSet::id)
                 .toList();

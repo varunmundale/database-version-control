@@ -65,6 +65,15 @@ public final class ChangesetRepository {
                 .execute();
     }
 
+    /**
+     * Throws away one staged changeset. Used when the DDL it describes failed against the real database, so the
+     * row would otherwise sit at PENDING forever - invisible to {@code appliedChangesets}, therefore never
+     * committable, and yet counted as part of the branch's working set.
+     */
+    public void delete(long changesetId) {
+        dsl().deleteFrom(TABLE).where(ID.eq(changesetId)).execute();
+    }
+
     /** Every changeset staged for a branch, in staged order, regardless of status. */
     public List<ChangeSet> findByBranch(String branchName) {
         return select().where(BRANCH_NAME.eq(branchName)).orderBy(ID).fetch(ChangesetRepository::toChangeSet);

@@ -1,6 +1,8 @@
 package org.example.service;
 
 import org.example.core.forker.Forker;
+import org.example.config.ConcurrencyConfig;
+import org.example.core.locking.BranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
@@ -35,6 +37,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,7 +62,8 @@ class DbGitCommandsTest {
      */
     private DaemonSession listener(Forker forker) {
         try {
-            DbGitCommandListener listener = new DbGitCommandListener(forker, 0);
+            DbGitCommandListener listener = new DbGitCommandListener(forker, 0,
+                    ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
             listeners.add(listener);
             DaemonSession session = new DaemonSession(listener, "tester");
             // main tracks a real database now, so point it at one before any test touches it.
@@ -277,11 +284,14 @@ class DbGitCommandsTest {
 
         DbGitCommandResult result = dbgit.execute("dbgit merge feature/orders");
 
-        assertEquals(List.of(
-                "Merged 'feature/orders' into 'main' as commit #3, applying 1 changeset(s).",
-                "Validated via staging branch 'merge/main-feature/orders'."
-        ), result.lines());
-        assertTrue(metadataStore.branches().contains("merge/main-feature/orders"));
+        assertEquals("Merged 'feature/orders' into 'main' as commit #3, applying 1 changeset(s).",
+                result.lines().getFirst());
+        // The staging branch is named per attempt, so two overlapping merges of the same pair cannot collide.
+        assertTrue(result.lines().get(1).startsWith("Validated via staging branch 'merge/main-feature/orders-"),
+                result.lines().toString());
+        // ...and it exists only to prove the replay, so it is gone once the merge is settled.
+        assertTrue(metadataStore.branches().stream().noneMatch(branch -> branch.startsWith("merge/")),
+                metadataStore.branches().toString());
 
         List<ChangeSet> mainHistory = metadataStore.commitHistory("main");
         assertEquals(2, mainHistory.size());
@@ -552,6 +562,114 @@ class DbGitCommandsTest {
         return lines.stream().filter(line -> !line.startsWith("Date:") && !line.isBlank()).toList();
     }
 
+    /**
+     * The failure this guards against is the worst one in the system, and it is silent: two commits both parent
+     * off the same HEAD, the second overwrites it, and the first becomes reachable from nothing - while its
+     * changesets are already marked COMMIT, so neither the working set nor a reset can ever find them again.
+     */
+    @Test
+    void concurrentCommittersOnOneBranchDoNotLoseEachOthersCommits() throws Exception {
+        int committers = 4;
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DaemonSession owner = listener(new Forker(new RecordingRunner(new CommandResult(0, "true")),
+                new MultiRecordingConnectorFactory(), metadataStore));
+        owner.execute("dbgit checkout -b feature/orders");
+        owner.add("CREATE TABLE orders (id INT NOT NULL);");
+        owner.execute("dbgit commit -m base table");
+
+        ExecutorService clients = Executors.newFixedThreadPool(committers);
+        try {
+            List<Future<?>> pending = new ArrayList<>();
+            for (int client = 0; client < committers; client++) {
+                DaemonSession session = owner.anotherUser("user" + client);
+                String column = "col" + client;
+                pending.add(clients.submit(() -> {
+                    session.add("ALTER TABLE orders ADD COLUMN " + column + " INT;");
+                    return session.execute("dbgit commit -m add " + column);
+                }));
+            }
+            for (Future<?> outcome : pending) {
+                outcome.get(20, TimeUnit.SECONDS);
+            }
+        } finally {
+            clients.shutdownNow();
+        }
+
+        // Every changeset ever staged on the branch is still reachable by walking its commits.
+        List<Long> staged = metadataStore.changesetsForBranch("feature/orders").stream().map(ChangeSet::id).sorted().toList();
+        List<Long> reachable = metadataStore.commitHistory("feature/orders").stream().map(ChangeSet::id).sorted().toList();
+        assertEquals(committers + 1, staged.size());
+        assertEquals(staged, reachable, "a commit was lost: its changesets are no longer reachable from HEAD");
+        assertTrue(metadataStore.workingSet("feature/orders").isEmpty());
+    }
+
+    /**
+     * The row is written before the statement runs. Left behind it would sit at PENDING forever: excluded from
+     * appliedChangesets so it could never be committed, yet counted in the working set and destroyed by the next
+     * reset - a record of something that never happened.
+     */
+    @Test
+    void aChangesetWhoseDdlFailsAgainstTheDatabaseIsNotLeftBehind() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(),
+                new FailingConnectorFactory("CREATE TABLE orders (id INT NOT NULL);"), metadataStore));
+
+        assertThrows(RuntimeException.class, () -> dbgit.add("CREATE TABLE orders (id INT NOT NULL);"));
+
+        assertTrue(metadataStore.changesetsForBranch("main").isEmpty(),
+                "a changeset that never reached the database should not survive");
+        assertTrue(metadataStore.workingSet("main").isEmpty());
+    }
+
+    /**
+     * The name is claimed before the database is built. Leaving it claimed would wedge it permanently: the branch
+     * would list, its database would not exist, and forking it again would be refused as already existing.
+     */
+    @Test
+    void aForkThatFailsPartWayGivesTheBranchNameBack() {
+        InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(new CommandResult(0, "true")),
+                new FailingConnectorFactory("CREATE DATABASE \"feature_orders_postgres\""), metadataStore));
+
+        assertThrows(RuntimeException.class, () -> dbgit.execute("dbgit checkout -b feature/orders"));
+
+        assertFalse(metadataStore.branches().contains("feature/orders"),
+                "the half-built branch should not hold its name");
+        // And the name is free again, so a retry is possible rather than permanently refused.
+        assertTrue(metadataStore.createBranch("feature/orders", "main"));
+    }
+
+    /** Fails one specific statement and passes everything else, so a failure can be aimed at one step. */
+    private static final class FailingConnectorFactory implements ConnectorFactory {
+        private final String failingStatement;
+
+        private FailingConnectorFactory(String failingStatement) {
+            this.failingStatement = failingStatement;
+        }
+
+        @Override
+        public SqlConnector connect(ConnectionSettings settings) {
+            return new SqlConnector() {
+                @Override
+                public SqlExecutionResult execute(String sql) throws java.sql.SQLException {
+                    if (sql.equals(failingStatement)) {
+                        throw new java.sql.SQLException("syntax error");
+                    }
+                    return new SqlExecutionResult(false, 0, List.of());
+                }
+
+                @Override
+                public <T> T transaction(SqlTransaction<T> work) throws java.sql.SQLException {
+                    return work.execute(this);
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+        }
+    }
+
     private static final class RecordingRunner implements CommandRunner {
         private final List<CommandResult> results;
         private final List<List<String>> commands = new ArrayList<>();
@@ -676,6 +794,17 @@ class DbGitCommandsTest {
                 headCommitByBranch.put(branchName, headCommitByBranch.get(forkedFrom));
             }
             return added;
+        }
+
+        @Override
+        public void deleteBranch(String branch) {
+            branches.remove(branch);
+            headCommitByBranch.remove(branch);
+        }
+
+        @Override
+        public void discardChangeset(long changesetId) {
+            changesetsById.remove(changesetId);
         }
 
         @Override

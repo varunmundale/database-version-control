@@ -23,7 +23,7 @@ public final class CommitCommand extends Command {
 
     public CommitCommand(CommandContext context, List<String> arguments) {
         super(context);
-        this.committer = new Committer(context.versioningService());
+        this.committer = new Committer(context.versioningService(), context.locks());
         this.arguments = List.copyOf(Objects.requireNonNull(arguments, "arguments must not be null"));
     }
 

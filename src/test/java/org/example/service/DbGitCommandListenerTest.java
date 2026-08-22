@@ -39,7 +39,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntFunction;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -47,6 +49,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.example.config.ConcurrencyConfig;
+import org.example.core.locking.BranchLocks;
 import org.example.protocol.RequestContext;
 import org.example.protocol.RequestHeader;
 
@@ -68,7 +71,8 @@ class DbGitCommandListenerTest {
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         listener = new DbGitCommandListener(
-                new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
+                new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0,
+                ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
         // main tracks a real database now, so point it at one before any request arrives.
         listener.execute(new RequestContext("tester", branch, tracked), "dbgit init");
         serverThread = new Thread(() -> {
@@ -164,7 +168,7 @@ class DbGitCommandListenerTest {
                 throw new IllegalStateException("handlers did not overlap", exception);
             }
         })) {
-            List<Response> responses = daemon.inParallel(clients);
+            List<Response> responses = daemon.inParallel(clients, client -> "feature/" + client);
 
             assertEquals(clients, responses.stream().filter(response -> response.status.equals("OK")).count(),
                     responses.toString());
@@ -185,7 +189,8 @@ class DbGitCommandListenerTest {
                 Thread.currentThread().interrupt();
             }
         })) {
-            List<Response> responses = daemon.inParallel(4, release::countDown);
+            List<Response> responses = daemon.inParallel(4, client -> RequestContext.DEFAULT_BRANCH,
+                    release::countDown);
 
             long busy = responses.stream()
                     .filter(response -> "ERR".equals(response.status)
@@ -195,6 +200,39 @@ class DbGitCommandListenerTest {
             assertTrue(responses.stream().allMatch(response -> response.status != null),
                     "no connection should be answered with nothing at all");
         }
+    }
+
+    /**
+     * The other half of the same guarantee: work on one branch is serialized, however many handlers are free. An
+     * unserialized daemon would have all three inside at once, since nothing else here blocks.
+     */
+    @Test
+    void addsToOneBranchAreSerializedEvenWhenHandlersAreFree() throws Exception {
+        AtomicInteger inside = new AtomicInteger();
+        AtomicInteger mostAtOnce = new AtomicInteger();
+        try (Daemon daemon = daemon(new ConcurrencyConfig(4, 8, 5000, 5000, 60000), () -> {
+            mostAtOnce.accumulateAndGet(inside.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            inside.decrementAndGet();
+        })) {
+            List<Response> responses = daemon.inParallel(3, client -> "feature/shared");
+
+            assertEquals(3, responses.stream().filter(response -> response.status.equals("OK")).count(),
+                    responses.toString());
+            assertEquals(1, mostAtOnce.get(), "two commands were inside the same branch at once");
+            // Each add validated against its predecessor's effect, so the changesets are numbered in the order
+            // they actually ran - which is what a later replay depends on.
+            assertEquals(List.of(1L, 2L, 3L), responses.stream().map(DbGitCommandListenerTest::changesetId).sorted().toList());
+        }
+    }
+
+    private static long changesetId(Response response) {
+        String line = response.body.getFirst();
+        return Long.parseLong(line.substring(line.indexOf('#') + 1, line.indexOf(" for ")));
     }
 
     /** A daemon of its own, so a test can choose its thread count without disturbing the shared one. */
@@ -216,7 +254,8 @@ class DbGitCommandListenerTest {
             }
         };
         DbGitCommandListener owned = new DbGitCommandListener(
-                new Forker(new RecordingRunner(), connectors, new InMemoryMetadataStore()), 0, concurrency);
+                new Forker(new RecordingRunner(), connectors, new InMemoryMetadataStore()), 0, concurrency,
+                BranchLocks.inMemory());
         // Reaches the database only to connect, never to execute, so the gate does not hold up start-up.
         owned.execute(new RequestContext("tester", RequestContext.DEFAULT_BRANCH, tracked), "dbgit init");
         Thread thread = new Thread(() -> {
@@ -240,12 +279,15 @@ class DbGitCommandListenerTest {
         }
 
         /** Fires {@code clients} concurrent {@code dbgit add}s, running {@code afterSubmitting} once all are in flight. */
-        List<Response> inParallel(int clients, Runnable... afterSubmitting) throws Exception {
+        List<Response> inParallel(int clients, IntFunction<String> branchOf, Runnable... afterSubmitting)
+                throws Exception {
             ExecutorService pool = Executors.newFixedThreadPool(clients);
             try {
                 List<Future<Response>> pending = new ArrayList<>();
                 for (int client = 0; client < clients; client++) {
-                    pending.add(pool.submit(() -> sendTo(owned.port(), "CREATE TABLE orders (id INT NOT NULL);")));
+                    String branch = branchOf.apply(client);
+                    String ddl = "CREATE TABLE orders" + client + " (id INT NOT NULL);";
+                    pending.add(pool.submit(() -> sendTo(owned.port(), branch, ddl)));
                     Thread.sleep(120);
                 }
                 for (Runnable release : afterSubmitting) {
@@ -268,10 +310,10 @@ class DbGitCommandListenerTest {
         }
     }
 
-    private Response sendTo(int port, String ddl) throws IOException {
+    private Response sendTo(int port, String onBranch, String ddl) throws IOException {
         try (Socket socket = new Socket("localhost", port)) {
             try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8)) {
-                writer.println(header());
+                writer.println(RequestHeader.render(new RequestContext("tester", onBranch, tracked)));
                 writer.println("dbgit add");
                 writer.print(ddl);
                 writer.flush();
@@ -368,6 +410,17 @@ class DbGitCommandListenerTest {
                 headCommitByBranch.put(branchName, headCommitByBranch.get(forkedFrom));
             }
             return added;
+        }
+
+        @Override
+        public void deleteBranch(String branch) {
+            branches.remove(branch);
+            headCommitByBranch.remove(branch);
+        }
+
+        @Override
+        public void discardChangeset(long changesetId) {
+            changesetsById.remove(changesetId);
         }
 
         @Override

@@ -2,6 +2,7 @@ package org.example.service.command;
 
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
+import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.core.versioning.VersioningService;
 import org.example.protocol.RequestContext;
@@ -17,17 +18,18 @@ import java.util.Objects;
  * caller's, not a process-wide file's.
  */
 public record CommandContext(Forker forker, Replayer replayer, BranchConnections connections,
-                             RequestContext request) {
+                             BranchLocks locks, RequestContext request) {
     public CommandContext {
         Objects.requireNonNull(forker, "forker must not be null");
         Objects.requireNonNull(replayer, "replayer must not be null");
         Objects.requireNonNull(connections, "connections must not be null");
+        Objects.requireNonNull(locks, "locks must not be null");
         Objects.requireNonNull(request, "request must not be null");
     }
 
     /** The same shared collaborators, bound to another request. */
     public CommandContext forRequest(RequestContext other) {
-        return new CommandContext(forker, replayer, connections, other);
+        return new CommandContext(forker, replayer, connections, locks, other);
     }
 
     /** The branch this request is acting on - what {@code .dbgit/HEAD} used to answer, per caller now. */

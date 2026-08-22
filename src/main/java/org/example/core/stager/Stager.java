@@ -2,6 +2,8 @@ package org.example.core.stager;
 
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
+import org.example.core.locking.BranchLease;
+import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
 import org.example.models.schema.TableModel;
@@ -21,15 +23,29 @@ public final class Stager {
     private final Forker forker;
     private final Replayer replayer;
     private final BranchConnections connections;
+    private final BranchLocks locks;
 
-    public Stager(Forker forker, Replayer replayer, BranchConnections connections) {
+    public Stager(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks) {
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
         this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
+        this.locks = Objects.requireNonNull(locks, "locks must not be null");
     }
 
+    /**
+     * Held under the branch's lock from the first read to the last write. The staged changeset, the DDL that
+     * actually runs, and the row that records it having run are three separate transactions with an
+     * irreversible statement in the middle, so nothing but a lock spanning all of it keeps two concurrent adds
+     * from validating against the same past and executing in an order their changeset ids do not describe.
+     */
     public StageResult stage(RequestContext request, String statement) {
         String branch = request.branch();
+        try (BranchLease ignored = locks.acquire(branch)) {
+            return staged(request, branch, statement);
+        }
+    }
+
+    private StageResult staged(RequestContext request, String branch, String statement) {
         VersioningService versioningService = forker.versioningService();
 
         String tableName = replayer.tableName(statement);
@@ -38,7 +54,15 @@ public final class Stager {
 
         long changesetId = versioningService.stageChangeset(branch, statement);
 
-        forker.branchDatabases().apply(connections.forBranch(request, branch), statement);
+        try {
+            forker.branchDatabases().apply(connections.forBranch(request, branch), statement);
+        } catch (RuntimeException exception) {
+            // The row was written before the statement ran. Left behind it would sit at PENDING forever:
+            // excluded from appliedChangesets so it can never be committed, yet counted in the working set
+            // and destroyed by the next reset. It describes something that never happened, so it goes.
+            versioningService.discardChangeset(changesetId);
+            throw exception;
+        }
 
         versioningService.markApplied(changesetId);
         return new StageResult(changesetId, updated.name(), updated.columns().size());

@@ -30,6 +30,14 @@ final class DaemonSession {
         return branch;
     }
 
+    /** Another client of the same daemon, starting where this one is - for tests that need two callers at once. */
+    DaemonSession anotherUser(String otherUser) {
+        DaemonSession other = new DaemonSession(listener, otherUser);
+        other.branch = branch;
+        other.trackedDatabase = trackedDatabase;
+        return other;
+    }
+
     RequestContext request() {
         return new RequestContext(user, branch, trackedDatabase);
     }

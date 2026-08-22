@@ -195,6 +195,17 @@ class ForkerTest {
         }
 
         @Override
+        public void deleteBranch(String branch) {
+            branches.remove(branch);
+            commitHistoryByBranch.remove(branch);
+        }
+
+        @Override
+        public void discardChangeset(long changesetId) {
+            // Nothing is staged in this fake, so there is never anything to discard.
+        }
+
+        @Override
         public long stageChangeset(String branch, String ddl) {
             return nextId++;
         }

@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS branch_commits (
     id                      BIGSERIAL PRIMARY KEY,
     parent_commit_id        BIGINT REFERENCES branch_commits(id),
     second_parent_commit_id BIGINT REFERENCES branch_commits(id),
-    next_commit_id          BIGINT REFERENCES branch_commits(id),
     created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -16,6 +15,11 @@ ALTER TABLE branch_commits
 -- Likewise for commits created before dbgit recorded who wrote them and why; both read back defaulted.
 ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS author TEXT;
 ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS message TEXT;
+
+-- A commit can have several children - that is what branching is - so a single forward pointer could never be
+-- right. Nothing read it (ancestry walks parent_commit_id), while two branches sharing a HEAD both wrote it,
+-- holding locks on different branches. Children are derivable from the parent columns if ever needed.
+ALTER TABLE branch_commits DROP COLUMN IF EXISTS next_commit_id;
 
 CREATE TABLE IF NOT EXISTS branch_metadata (
     branch_name    TEXT PRIMARY KEY,

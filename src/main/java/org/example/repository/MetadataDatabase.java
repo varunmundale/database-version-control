@@ -70,6 +70,22 @@ public final class MetadataDatabase {
     }
 
     /**
+     * Runs {@code work} in one {@code REPEATABLE READ} transaction: every query inside it sees the same snapshot.
+     *
+     * <p>For reads, not writes. Outside a transaction jOOQ takes a fresh connection per query, so a multi-query
+     * read - reconstructing a branch's commits takes three - spans three snapshots and can see a commit land
+     * halfway through, reporting a changeset twice or not at all. That torn view then feeds what
+     * {@code Stager}, {@code Merger} and {@code Resetter} decide to do, which is why it is worth a transaction
+     * even though nothing here writes. It also collapses those queries onto one connection.
+     */
+    public <T> T snapshot(String failureMessage, Supplier<T> work) {
+        return transaction(failureMessage, () -> {
+            dsl.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+            return work.get();
+        });
+    }
+
+    /**
      * Runs {@code work} - and every repository call it makes - in one transaction, rolled back if it throws.
      *
      * <p>Deliberately jOOQ's transaction rather than {@link org.example.connectors.SqlConnector#transaction}: the

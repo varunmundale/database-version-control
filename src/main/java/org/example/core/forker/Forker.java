@@ -76,12 +76,30 @@ public final class Forker {
 
             out("Recreating branch '" + currentBranch + "' from " + history.size() + " committed changeset(s) shared with '" + fromBranch + "'.");
             branchDatabases.replay(database, history);
-        } catch (RepositoryException exception) {
-            throw fail(exception.getMessage(), exception);
+        } catch (RuntimeException exception) {
+            // The name was claimed before any of this ran. Leaving it claimed would wedge it permanently:
+            // the branch would list, its database would not exist, and forking it again would be refused as
+            // already existing. Nothing has been staged on it yet, so giving it back is safe.
+            abandon(currentBranch, database);
+            throw exception instanceof ForkException forked ? forked : fail(exception.getMessage(), exception);
         }
 
         out("Branch fork completed for '" + currentBranch + "'.");
         return new ForkResult(fromBranch, currentBranch, config.containerName(), database);
+    }
+
+    /** Undoes a half-built fork, best-effort: a failure here must not mask the failure that caused it. */
+    private void abandon(String branch, String database) {
+        try {
+            branchDatabases.dropDatabase(database);
+        } catch (RuntimeException ignored) {
+            err("Could not drop the partially created database '" + database + "'.");
+        }
+        try {
+            versioningService.deleteBranch(branch);
+        } catch (RuntimeException ignored) {
+            err("Could not release the branch name '" + branch + "'; it may need removing by hand.");
+        }
     }
 
     private static void validateBranch(String branch, String argumentName) {

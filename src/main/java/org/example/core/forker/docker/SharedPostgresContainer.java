@@ -17,6 +17,9 @@ public final class SharedPostgresContainer {
     private static final int CONTAINER_PORT = 5432;
     private static final int READY_ATTEMPTS = 20;
 
+    /** Set once the container has been seen accepting connections; never unset, so the check is paid once. */
+    private volatile boolean ready;
+
     private final CommandRunner commandRunner;
     private final BranchDatabaseConfig config;
     private final BranchDatabaseRepository branchDatabases;
@@ -27,10 +30,28 @@ public final class SharedPostgresContainer {
         this.branchDatabases = Objects.requireNonNull(branchDatabases, "branchDatabases must not be null");
     }
 
-    /** Starts the shared container if it isn't already running, then blocks until it accepts connections. */
+    /**
+     * Starts the shared container if it isn't already running, then blocks until it accepts connections.
+     *
+     * <p>Synchronized and remembered. Two threads racing here would both see "not running" and both issue
+     * {@code docker run} with the same {@code --name}, and the loser would fail with a name conflict - aborting an
+     * otherwise healthy fork. Remembering also means the callers that ask twice for one command, or once per
+     * command thereafter, cost a volatile read rather than a subprocess.
+     *
+     * <p>The flag is set only on success, so a failed start is retried by the next caller.
+     */
     public void ensureRunning() {
-        ensureStarted();
-        waitUntilReady();
+        if (ready) {
+            return;
+        }
+        synchronized (this) {
+            if (ready) {
+                return;
+            }
+            ensureStarted();
+            waitUntilReady();
+            ready = true;
+        }
     }
 
     private void ensureStarted() {
@@ -42,14 +63,17 @@ public final class SharedPostgresContainer {
         }
 
         out("Starting shared PostgreSQL container '" + config.containerName() + "'.");
-        runChecked("start shared PostgreSQL container", List.of(
+        // Another dbgit process may have won the race to create it; that is the outcome we wanted either way.
+        CommandResult started = run(List.of(
                 "docker", "run", "--detach", "--name", config.containerName(),
                 "--publish", config.hostPort() + ":" + CONTAINER_PORT,
                 "--env", "POSTGRES_USER=" + config.user(),
                 "--env", "POSTGRES_PASSWORD=" + config.password(),
                 "--env", "POSTGRES_DB=" + config.adminDatabase(),
-                config.image()
-        ));
+                config.image()), "start shared PostgreSQL container", false);
+        if (!started.succeeded() && !started.output().contains("already in use")) {
+            throw fail("Could not start shared PostgreSQL container. Docker said: " + started.output(), null);
+        }
     }
 
     private void waitUntilReady() {

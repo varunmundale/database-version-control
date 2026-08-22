@@ -17,8 +17,11 @@ import java.util.List;
  * {@code checkout} or an unreachable {@code init} leaves the workspace as it was.
  */
 public class Main {
+    /** Where {@code .dbgit} lives. The wrapper script sets this to the directory the user actually ran from. */
+    private static final String WORKSPACE_VARIABLE = "DBGIT_WORKSPACE";
+
     public static void main(String[] args) {
-        ClientWorkspace workspace = new ClientWorkspace(Path.of(".").toAbsolutePath().normalize());
+        ClientWorkspace workspace = new ClientWorkspace(workspaceDirectory());
         DbGitClient client = new DbGitClient();
         List<String> arguments = List.of(args);
         System.exit(run(workspace, client, arguments));
@@ -74,6 +77,16 @@ public class Main {
             return java.util.Optional.of(arguments.get(2));
         }
         return java.util.Optional.empty();
+    }
+
+    /**
+     * Read from the environment rather than from the working directory, because the {@code dbgit} wrapper has to
+     * {@code cd} to the project to run Maven - which would otherwise make every caller on the machine share one
+     * workspace, and with it one current branch. That is exactly what the daemon stopped doing.
+     */
+    private static Path workspaceDirectory() {
+        String configured = System.getenv(WORKSPACE_VARIABLE);
+        return Path.of(configured == null || configured.isBlank() ? "." : configured).toAbsolutePath().normalize();
     }
 
     private static String readStdin() {

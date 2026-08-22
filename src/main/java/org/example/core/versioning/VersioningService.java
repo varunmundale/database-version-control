@@ -22,8 +22,17 @@ public interface VersioningService {
     /** Atomically claims a branch name. Returns {@code false} if the branch already existed. */
     boolean createBranch(String branchName, String forkedFrom);
 
+    /**
+     * Gives up a branch name claimed by {@link #createBranch} whose database was never finished. Only safe for a
+     * branch that has staged nothing yet, which is exactly the window a failed fork leaves open.
+     */
+    void deleteBranch(String branch);
+
     /** Stages a raw DDL statement for a branch with status PENDING. Returns the new changeset's id. */
     long stageChangeset(String branch, String ddl);
+
+    /** Throws away a staged changeset whose DDL never made it into the database. */
+    void discardChangeset(long changesetId);
 
     /** Transitions a staged changeset from PENDING to APPLIED, once it has run successfully against the database. */
     void markApplied(long changesetId);

@@ -2,6 +2,8 @@ package org.example.core.resetter;
 
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
+import org.example.core.locking.BranchLease;
+import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
 import org.example.core.versioning.VersioningService;
@@ -35,10 +37,13 @@ public final class Resetter {
     private final Replayer replayer;
     private final BranchConnections connections;
 
-    public Resetter(Forker forker, Replayer replayer, BranchConnections connections) {
+    private final BranchLocks locks;
+
+    public Resetter(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks) {
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
         this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
+        this.locks = Objects.requireNonNull(locks, "locks must not be null");
     }
 
     public ResetResult reset(RequestContext request, long commitId) {
@@ -49,6 +54,16 @@ public final class Resetter {
                     + " branch instead, or point 'main' elsewhere with 'dbgit init'.");
         }
 
+        // Global rather than per-branch, and a cold image pull takes minutes - so it happens before the branch
+        // is locked, where it would stall every other command on that branch for the duration.
+        forker.ensureBranchDatabasesRunning();
+
+        try (BranchLease ignored = locks.acquire(branch)) {
+            return reset(request, branch, commitId);
+        }
+    }
+
+    private ResetResult reset(RequestContext request, String branch, long commitId) {
         VersioningService versioningService = forker.versioningService();
         List<ChangeSet> history = historyThrough(versioningService.commits(branch), branch, commitId);
 
@@ -56,7 +71,6 @@ public final class Resetter {
 
         int dropped = versioningService.resetTo(branch, commitId);
 
-        forker.ensureBranchDatabasesRunning();
         String database = BranchConnections.forkedDatabaseName(branch);
         forker.branchDatabases().dropDatabase(database);
         forker.branchDatabases().createDatabase(database);

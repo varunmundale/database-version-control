@@ -22,7 +22,6 @@ public final class CommitRepository {
     private static final Field<Long> ID = DSL.field("id", SQLDataType.BIGINT);
     private static final Field<Long> PARENT_COMMIT_ID = DSL.field("parent_commit_id", SQLDataType.BIGINT);
     private static final Field<Long> SECOND_PARENT_COMMIT_ID = DSL.field("second_parent_commit_id", SQLDataType.BIGINT);
-    private static final Field<Long> NEXT_COMMIT_ID = DSL.field("next_commit_id", SQLDataType.BIGINT);
     private static final Field<String> AUTHOR = DSL.field("author", SQLDataType.CLOB);
     private static final Field<String> MESSAGE = DSL.field("message", SQLDataType.CLOB);
     private static final Field<OffsetDateTime> CREATED_AT = DSL.field("created_at", SQLDataType.TIMESTAMPWITHTIMEZONE);
@@ -40,10 +39,6 @@ public final class CommitRepository {
                 .values(parentCommitId, secondParentCommitId, metadata.author(), metadata.message())
                 .returning(ID)
                 .fetchOne(ID);
-    }
-
-    public void updateNextCommitId(long commitId, long nextCommitId) {
-        dsl().update(TABLE).set(NEXT_COMMIT_ID, nextCommitId).where(ID.eq(commitId)).execute();
     }
 
     /** Every commit, keyed by id - the raw material a branch's history is walked out of, and what {@code dbgit log} reads. */

@@ -5,6 +5,8 @@ import org.example.core.differ.Side;
 import org.example.core.differ.TableDiff;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
+import org.example.core.locking.BranchLease;
+import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
 import org.example.models.schema.TableModel;
@@ -27,23 +29,42 @@ import java.util.Objects;
  * introduced them, reachable by walking both parent chains ({@link VersioningService#commitHistory}).
  */
 public final class Merger {
+    /** Distinguishes one merge attempt from another, so their staging branches cannot collide. */
+    private static final java.util.concurrent.atomic.AtomicLong NONCE =
+            new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+
     private final Forker forker;
     private final Replayer replayer;
     private final DatabaseDiff databaseDiff;
     private final BranchConnections connections;
+    private final BranchLocks locks;
 
-    public Merger(Forker forker, Replayer replayer, BranchConnections connections) {
-        this(forker, replayer, connections, new DatabaseDiff());
+    public Merger(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks) {
+        this(forker, replayer, connections, locks, new DatabaseDiff());
     }
 
-    public Merger(Forker forker, Replayer replayer, BranchConnections connections, DatabaseDiff databaseDiff) {
+    public Merger(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks,
+                  DatabaseDiff databaseDiff) {
+        this.locks = Objects.requireNonNull(locks, "locks must not be null");
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
         this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
         this.databaseDiff = Objects.requireNonNull(databaseDiff, "databaseDiff must not be null");
     }
 
+    /**
+     * Both branches are locked, in a fixed order, for the whole merge: the conflict check, the replay into two
+     * real databases and the merge commit are otherwise three views of a history that can move underneath them,
+     * and a merge commit whose parents were never the basis for what was replayed is corruption no later read
+     * can detect.
+     */
     public MergeResult merge(RequestContext request, String otherBranch) {
+        try (BranchLease ignored = locks.acquire(request.branch(), otherBranch)) {
+            return merged(request, otherBranch);
+        }
+    }
+
+    private MergeResult merged(RequestContext request, String otherBranch) {
         String currentBranch = request.branch();
         VersioningService versioningService = forker.versioningService();
         List<ChangeSet> currentHistory = versioningService.commitHistory(currentBranch);
@@ -61,14 +82,18 @@ public final class Merger {
         }
 
         String stagingBranch = stagingBranchName(currentBranch, otherBranch);
-        forker.fork(currentBranch, stagingBranch);
-        forker.branchDatabases().replay(connections.forBranch(request, stagingBranch), otherOnly);
+        try {
+            forker.fork(currentBranch, stagingBranch);
+            forker.branchDatabases().replay(connections.forBranch(request, stagingBranch), otherOnly);
 
-        forker.branchDatabases().replay(connections.forBranch(request, currentBranch), otherOnly);
+            forker.branchDatabases().replay(connections.forBranch(request, currentBranch), otherOnly);
 
-        long commitId = versioningService.createMergeCommit(currentBranch, otherBranch,
-                CommitMetadata.by(null, "Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));
-        return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());
+            long commitId = versioningService.createMergeCommit(currentBranch, otherBranch,
+                    CommitMetadata.by(null, "Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));
+            return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());
+        } finally {
+            discard(stagingBranch);
+        }
     }
 
     /**
@@ -95,8 +120,29 @@ public final class Merger {
         return lines;
     }
 
+    /**
+     * The staging branch exists only to prove the replay works before it touches the target's real database, so it
+     * goes as soon as that is settled - whether the merge succeeded or not. Best-effort: failing to clean up must
+     * not turn a completed merge into a reported failure.
+     */
+    private void discard(String stagingBranch) {
+        try {
+            forker.branchDatabases().dropDatabase(BranchConnections.forkedDatabaseName(stagingBranch));
+        } catch (RuntimeException ignored) {
+            // Left behind in the scratchpad; harmless, and the name will not be reused.
+        }
+        try {
+            forker.versioningService().deleteBranch(stagingBranch);
+        } catch (RuntimeException ignored) {
+            // Ditto - it holds no changesets of its own.
+        }
+    }
+
     private static String stagingBranchName(String currentBranch, String otherBranch) {
-        return "merge/" + currentBranch + "-" + otherBranch;
+        // Unique per attempt. The name used to be derived from the two branches alone, which was fine only while
+        // one merge could ever be in flight: two overlapping merges of the same pair - or one retried after a
+        // failure - collided on a branch that already existed, and the second was refused for the wrong reason.
+        return "merge/" + currentBranch + "-" + otherBranch + "-" + Long.toHexString(NONCE.incrementAndGet());
     }
 
     /** How far the two histories agree before diverging - the same notion {@link HistoryDiffFormatter} uses. */

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # CLI client for the dbService daemon. Requires ./dbService to already be running.
+#
+# Your workspace is the directory you run this from: it holds .dbgit/HEAD (which branch you are on) and
+# .dbgit/config.json (how to reach the database main tracks). The daemon keeps neither, so two people - or two
+# shells - can share one daemon from different directories and each stay on their own branch.
 set -euo pipefail
+export DBGIT_WORKSPACE="${DBGIT_WORKSPACE:-$PWD}"
 cd "$(dirname "$0")"
 exec mvn -q exec:java -Dexec.mainClass=org.example.client.Main -Dexec.args="$*"

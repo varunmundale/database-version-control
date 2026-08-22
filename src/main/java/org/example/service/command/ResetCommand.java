@@ -18,7 +18,7 @@ public final class ResetCommand extends Command {
 
     public ResetCommand(CommandContext context, String commit) {
         super(context);
-        this.resetter = new Resetter(context.forker(), context.replayer(), context.connections());
+        this.resetter = new Resetter(context.forker(), context.replayer(), context.connections(), context.locks());
         this.commit = Objects.requireNonNull(commit, "commit must not be null");
     }
 

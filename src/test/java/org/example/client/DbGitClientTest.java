@@ -1,6 +1,8 @@
 package org.example.client;
 
 import org.example.core.forker.Forker;
+import org.example.config.ConcurrencyConfig;
+import org.example.core.locking.BranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
@@ -55,7 +57,8 @@ class DbGitClientTest {
     void startServer() throws IOException {
         RecordingRunner runner = new RecordingRunner(new CommandResult(0, "true"));
         listener = new DbGitCommandListener(
-                new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0);
+                new Forker(runner, new NoOpConnectorFactory(), new InMemoryMetadataStore()), 0,
+                ConcurrencyConfig.getInstance(), BranchLocks.inMemory());
         // main tracks a real database now, so point it at one before any request arrives.
         listener.execute(request(), "dbgit init");
         serverThread = new Thread(() -> {
@@ -209,6 +212,17 @@ class DbGitClientTest {
                 headCommitByBranch.put(branchName, headCommitByBranch.get(forkedFrom));
             }
             return added;
+        }
+
+        @Override
+        public void deleteBranch(String branch) {
+            branches.remove(branch);
+            headCommitByBranch.remove(branch);
+        }
+
+        @Override
+        public void discardChangeset(long changesetId) {
+            changesetsById.remove(changesetId);
         }
 
         @Override

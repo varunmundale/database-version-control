@@ -1,5 +1,6 @@
 package org.example.service.command;
 
+import org.example.core.locking.BranchLease;
 import org.example.service.DbGitCommandResult;
 
 import java.util.List;
@@ -16,7 +17,12 @@ public final class CreateBranchCommand extends Command {
 
     @Override
     public DbGitCommandResult execute() {
-        context.forker().fork(context.branch(), branch);
+        // Bringing the shared container up is global and can take minutes on a cold pull; doing it before the
+        // locks are taken keeps it from blocking every other command on these two branches.
+        context.forker().ensureBranchDatabasesRunning();
+        try (BranchLease ignored = context.locks().acquire(context.branch(), branch)) {
+            context.forker().fork(context.branch(), branch);
+        }
         return print(List.of("Switched to a new branch '" + branch + "'."));
     }
 }

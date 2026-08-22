@@ -4,6 +4,8 @@ import org.example.core.forker.BranchConnections;
 import org.example.config.BranchDatabaseConfig;
 import org.example.config.ConcurrencyConfig;
 import org.example.core.forker.Forker;
+import org.example.core.locking.AdvisoryBranchLock;
+import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
 import org.example.protocol.RequestHeader;
@@ -20,6 +22,7 @@ import java.net.SocketException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.time.Duration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -54,12 +57,19 @@ public final class DbGitCommandListener implements Closeable {
     }
 
     public DbGitCommandListener(Forker forker, int port) throws IOException {
-        this(forker, port, ConcurrencyConfig.getInstance());
+        this(forker, port, ConcurrencyConfig.getInstance(), advisoryLocks(ConcurrencyConfig.getInstance()));
     }
 
-    public DbGitCommandListener(Forker forker, int port, ConcurrencyConfig concurrency) throws IOException {
+    /** Advisory locking is the default because it holds across daemon processes; tests inject an in-memory one. */
+    private static BranchLocks advisoryLocks(ConcurrencyConfig concurrency) {
+        return new BranchLocks(new AdvisoryBranchLock(), Duration.ofMillis(concurrency.lockTimeoutMs()));
+    }
+
+    public DbGitCommandListener(Forker forker, int port, ConcurrencyConfig concurrency, BranchLocks locks)
+            throws IOException {
         this.context = new CommandContext(Objects.requireNonNull(forker, "forker must not be null"),
                 new Replayer(), new BranchConnections(BranchDatabaseConfig.getInstance()),
+                Objects.requireNonNull(locks, "locks must not be null"),
                 new RequestContext(null, null, null));
         this.commandFactory = new CommandFactory(context);
         this.concurrency = Objects.requireNonNull(concurrency, "concurrency must not be null");

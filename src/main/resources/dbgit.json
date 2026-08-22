@@ -17,16 +17,6 @@
     "drainTimeoutMs": 30000,
     "lockTimeoutMs": 60000
   },
-  "pools": {
-    "metadata": {
-      "connectionTimeoutMs": 5000
-    },
-    "branch": {
-      "maxSize": 4,
-      "idleTimeoutMs": 30000,
-      "maxPools": 32
-    }
-  },
   "branchDatabases": {
     "containerName": "postgres-branches-scratchpad",
     "image": "postgres:16-alpine",

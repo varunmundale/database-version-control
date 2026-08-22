@@ -44,13 +44,37 @@ public final class BranchMetadataRepository {
         return inserted > 0;
     }
 
+    /**
+     * Removes a branch that was claimed but never finished being built. Only ever right for a branch with no
+     * changesets of its own - the foreign keys from {@code branch_changesets} and {@code tracked_databases}
+     * would refuse otherwise, which is the safety net rather than the mechanism.
+     */
+    public void delete(String branchName) {
+        dsl().deleteFrom(TABLE).where(BRANCH_NAME.eq(branchName)).execute();
+    }
+
     /** {@code null} both when the branch doesn't exist and when it exists but hasn't committed anything yet. */
     public Long findHeadCommitId(String branchName) {
         return dsl().select(HEAD_COMMIT_ID).from(TABLE).where(BRANCH_NAME.eq(branchName)).fetchOne(HEAD_COMMIT_ID);
     }
 
-    public void updateHeadCommitId(String branchName, long commitId) {
-        dsl().update(TABLE).set(HEAD_COMMIT_ID, commitId).where(BRANCH_NAME.eq(branchName)).execute();
+    /**
+     * Moves a branch's HEAD, but only if it is still where the caller last read it. Returns the number of rows
+     * changed - zero meaning someone else moved it first.
+     *
+     * <p>A branch lock already serializes the writers, so in correct operation this never fails. It is here
+     * because the failure it prevents is silent and unrecoverable: a blind write lets two commits both parent off
+     * the same HEAD, and the loser stays reachable from nothing while its changesets are already marked
+     * {@code COMMIT}, so neither the working set nor a reset can ever find them again. Cheap insurance against a
+     * lock that is one day missed.
+     *
+     * @param expectedCommitId the HEAD the caller based its work on; {@code null} for a branch with no commits yet
+     */
+    public int updateHeadCommitId(String branchName, Long expectedCommitId, long commitId) {
+        return dsl().update(TABLE).set(HEAD_COMMIT_ID, commitId)
+                .where(BRANCH_NAME.eq(branchName))
+                .and(expectedCommitId == null ? HEAD_COMMIT_ID.isNull() : HEAD_COMMIT_ID.eq(expectedCommitId))
+                .execute();
     }
 
     private static DSLContext dsl() {
