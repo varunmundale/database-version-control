@@ -228,6 +228,41 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
         assertEquals("numeric", schema.columnType(databaseOf("num"), "invoices", "amount"));
     }
 
+    /**
+     * Once {@code mb1} has been merged into {@code mb}, {@code mb}'s flattened history holds mb1's contributed
+     * changeset (the {@code sku} column) *after* mb's own unique commit ({@code owner}) - the second parent's
+     * content sorts after the first parent's own. Merging back the other way, {@code mb} into {@code mb1}, used to
+     * compare the two branches' flattened histories position by position, so it never got far enough past mb's own
+     * commit to see that the {@code sku} commit was shared, and replayed it a second time - failing with "column
+     * already exists" even though the only genuinely new thing to bring in is {@code owner}.
+     */
+    @Test
+    void mergingBackTheOtherWayAfterAPriorMergeOnlyBringsInTheGenuinelyNewColumn() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("CREATE TABLE products (id SERIAL, name VARCHAR(100) NOT NULL);");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "mb");
+        add("ALTER TABLE products ADD COLUMN owner VARCHAR(50);");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        dbgit("checkout", "-b", "mb1");
+        add("ALTER TABLE products ADD COLUMN sku VARCHAR(50);");
+        dbgit("commit");
+
+        dbgit("checkout", "mb");
+        CommandOutput merged = dbgit("merge", "mb1");
+        assertTrue(merged.out().getFirst().startsWith("Merged 'mb1' into 'mb' as commit #"), merged.text());
+        assertEquals(List.of("id", "name", "owner", "sku"), schema.columns(databaseOf("mb"), "products"));
+
+        dbgit("checkout", "mb1");
+        CommandOutput reverseMerged = dbgit("merge", "mb");
+        assertEquals("Merged 'mb' into 'mb1' as commit #5, applying 1 changeset(s).", reverseMerged.out().getFirst());
+        assertEquals(List.of("id", "name", "sku", "owner"), schema.columns(databaseOf("mb1"), "products"));
+    }
+
     @Test
     void aBranchCannotBeMergedIntoItself() {
         initialiseMain();

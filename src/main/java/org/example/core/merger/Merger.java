@@ -1,6 +1,8 @@
 package org.example.core.merger;
 
 import org.example.core.differ.DatabaseDiff;
+import org.example.core.differ.Differ;
+import org.example.core.differ.HistoryDiff;
 import org.example.core.differ.Side;
 import org.example.core.differ.TableDiff;
 import org.example.core.forker.BranchConnections;
@@ -9,20 +11,23 @@ import org.example.core.locking.BranchLease;
 import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
 import org.example.protocol.RequestContext;
-import org.example.models.schema.TableModel;
 import org.example.models.versioning.ChangeSet;
+import org.example.models.versioning.CommitEntry;
 import org.example.models.versioning.CommitMetadata;
 import org.example.core.versioning.VersioningService;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
- * Merges another branch's diverged history into a target branch. Reuses {@link DatabaseDiff} (the same engine
- * {@code dbgit diff} renders) to detect genuine conflicts between the two branches' fully replayed schemas, matched
- * by stable id. Free of conflicts, stages the merge in a scratch branch forked from the target's committed history,
+ * Merges another branch's diverged history into a target branch. Asks {@link Differ} - the same entry point
+ * {@code dbgit diff} goes through - what the two branches' histories look like against each other: which of the
+ * other branch's changesets this one doesn't have, and whether anything the two branches' fully replayed schemas
+ * share genuinely disagrees, matched by stable id. A merge that decided either of those its own way could
+ * contradict the diff the user was shown just before running it.
+ *
+ * <p>Free of conflicts, stages the merge in a scratch branch forked from the target's committed history,
  * physically replays the other branch's diverged changesets against it, and - only once that succeeds for real -
  * applies the same DDL to the target's own database and records a merge commit with two parents. A merge commit
  * itself carries no changesets; the changesets it brings in stay attributed to the commits that originally
@@ -34,22 +39,19 @@ public final class Merger {
             new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
 
     private final Forker forker;
-    private final Replayer replayer;
-    private final DatabaseDiff databaseDiff;
+    private final Differ differ;
     private final BranchConnections connections;
     private final BranchLocks locks;
 
     public Merger(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks) {
-        this(forker, replayer, connections, locks, new DatabaseDiff());
+        this(forker, connections, locks, new Differ(replayer, new DatabaseDiff()));
     }
 
-    public Merger(Forker forker, Replayer replayer, BranchConnections connections, BranchLocks locks,
-                  DatabaseDiff databaseDiff) {
+    public Merger(Forker forker, BranchConnections connections, BranchLocks locks, Differ differ) {
         this.locks = Objects.requireNonNull(locks, "locks must not be null");
         this.forker = Objects.requireNonNull(forker, "forker must not be null");
-        this.replayer = Objects.requireNonNull(replayer, "replayer must not be null");
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
-        this.databaseDiff = Objects.requireNonNull(databaseDiff, "databaseDiff must not be null");
+        this.differ = Objects.requireNonNull(differ, "differ must not be null");
     }
 
     /**
@@ -67,16 +69,16 @@ public final class Merger {
     private MergeResult merged(RequestContext request, String otherBranch) {
         String currentBranch = request.branch();
         VersioningService versioningService = forker.versioningService();
-        List<ChangeSet> currentHistory = versioningService.commitHistory(currentBranch);
-        List<ChangeSet> otherHistory = versioningService.commitHistory(otherBranch);
-        int divergedAt = commonPrefixLength(currentHistory, otherHistory);
-        List<ChangeSet> otherOnly = otherHistory.subList(divergedAt, otherHistory.size());
+        List<CommitEntry> currentCommits = versioningService.commits(currentBranch);
+        List<CommitEntry> otherCommits = versioningService.commits(otherBranch);
+        HistoryDiff diff = differ.diff(currentCommits, otherCommits);
+        List<ChangeSet> otherOnly = diff.rightOnly();
 
         if (otherOnly.isEmpty()) {
             return new MergeResult.AlreadyUpToDate();
         }
 
-        List<String> conflicts = conflicts(currentHistory, otherHistory);
+        List<String> conflicts = conflicts(diff);
         if (!conflicts.isEmpty()) {
             return new MergeResult.Conflict(conflicts);
         }
@@ -97,15 +99,13 @@ public final class Merger {
     }
 
     /**
-     * Everything {@link DatabaseDiff} finds genuinely conflicting (matched by stable id) between the two branches'
-     * fully replayed schemas: a column, constraint or index both branches changed in incompatible ways.
+     * Everything {@link Differ} found genuinely conflicting (matched by stable id) between the two branches' fully
+     * replayed schemas: a column, constraint or index both branches changed in incompatible ways. Named for the
+     * user rather than rendered as a tree - a merge reports why it stopped, it does not draw the diff.
      */
-    private List<String> conflicts(List<ChangeSet> currentHistory, List<ChangeSet> otherHistory) {
-        Map<String, TableModel> currentSchema = replayer.replay(currentHistory);
-        Map<String, TableModel> otherSchema = replayer.replay(otherHistory);
-
+    private static List<String> conflicts(HistoryDiff diff) {
         List<String> lines = new ArrayList<>();
-        for (TableDiff tableDiff : databaseDiff.diff(currentSchema.values(), otherSchema.values())) {
+        for (TableDiff tableDiff : diff.tables()) {
             String table = "table '" + tableDiff.tableName() + "', ";
             tableDiff.columnDiffs().stream()
                     .filter(columnDiff -> columnDiff.side() == Side.CONFLICT)
@@ -143,15 +143,5 @@ public final class Merger {
         // one merge could ever be in flight: two overlapping merges of the same pair - or one retried after a
         // failure - collided on a branch that already existed, and the second was refused for the wrong reason.
         return "merge/" + currentBranch + "-" + otherBranch + "-" + Long.toHexString(NONCE.incrementAndGet());
-    }
-
-    /** How far the two histories agree before diverging - the same notion {@link HistoryDiffFormatter} uses. */
-    private static int commonPrefixLength(List<ChangeSet> left, List<ChangeSet> right) {
-        int length = Math.min(left.size(), right.size());
-        int common = 0;
-        while (common < length && left.get(common).id() == right.get(common).id()) {
-            common++;
-        }
-        return common;
     }
 }
