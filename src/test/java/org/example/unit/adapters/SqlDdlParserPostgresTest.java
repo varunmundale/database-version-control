@@ -49,6 +49,23 @@ class SqlDdlParserPostgresTest {
         assertTrue(note.nullable());
     }
 
+    /**
+     * A type is SQL keywords, so the case it was typed in carries no meaning - but it is compared as a string, so
+     * the two spellings have to produce the same model. A branch compensating a retype back to what the shared
+     * history declared, in whatever case, must land back on that exact definition.
+     */
+    @Test
+    void aTypeIsCanonicalisedToUpperCaseSoTheCaseItWasWrittenInCarriesNoMeaning() {
+        SchemaOperation.CreateTable created =
+                (SchemaOperation.CreateTable) parser.parse("CREATE TABLE orders (department varchar(100));");
+        assertEquals("VARCHAR(100)", created.columns().getFirst().nativeType());
+
+        SchemaOperation.AlterColumnType retyped = (SchemaOperation.AlterColumnType)
+                parser.parse("ALTER TABLE orders ALTER COLUMN department TYPE Varchar (100);");
+        assertEquals("VARCHAR(100)", retyped.newType());
+    }
+
+
     @Test
     void parsesCreateTableIfNotExistsAndSchemaQualifiedNames() {
         SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
@@ -121,7 +138,7 @@ class SqlDdlParserPostgresTest {
 
         assertEquals("employees", operation.tableName());
         assertEquals("department", operation.columnName());
-        assertEquals("integer", operation.newType());
+        assertEquals("INTEGER", operation.newType());
     }
 
     /**

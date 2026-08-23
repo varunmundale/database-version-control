@@ -120,20 +120,20 @@ ALTER TABLE employees ALTER COLUMN department TYPE varchar(20);
 # merge onto other
 ./dbgit merge current # ----- here merge will fail because of department------
 
-##compensating statements the two-way conflict dtector is insufficient to handle this
-#./dbgit add
-#ALTER TABLE employees ALTER COLUMN department TYPE varchar(100);
-#./dbgit commit
-#
-#./dbgit diff other current
-## merge onto other
-#./dbgit merge current
+#compensating statements the two-way conflict dtector is insufficient to handle this
+./dbgit add
+ALTER TABLE employees ALTER COLUMN department TYPE varchar(100);
+./dbgit commit
 
-
-#Reset method to resolve conflict
-./dbgit log
-./dbgit reset 3
+./dbgit diff other current
+# merge onto other
 ./dbgit merge current
+
+
+##Reset method to resolve conflict
+#./dbgit log
+#./dbgit reset 3
+#./dbgit merge current
 
 
 

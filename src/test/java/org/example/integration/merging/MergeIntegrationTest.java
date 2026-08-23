@@ -313,6 +313,60 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
         assertEquals("10", schema.columnLength(databaseOf("other"), "employees", "department"));
     }
 
+    /**
+     * The other way of resolving the same conflict as the reset above: 'other' compensates, retyping the column
+     * back to what the shared history declared - and writes the type in the case it feels like, since a type is
+     * keywords rather than data. Once it has, only 'current' has moved the column, so the merge goes through and
+     * brings 'current's type in.
+     *
+     * <p>This used to be refused. The compensating {@code varchar(100)} was compared as a string against the
+     * {@code VARCHAR(100)} the {@code CREATE TABLE} recorded, so 'other' still counted as having changed the
+     * column and the conflict outlived the statement written to resolve it.
+     */
+    @Test
+    void compensatingBackToTheSharedTypeResolvesTheConflictWhateverCaseTheTypeIsWrittenIn() {
+        initialiseMain();
+        dbgit("checkout", "-b", "current");
+        add("""
+                CREATE TABLE employees (
+                    id SERIAL,
+                    name VARCHAR(100) NOT NULL,
+                    department VARCHAR(100)
+                );""");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "other");
+        add("ALTER TABLE employees ADD COLUMN other_column DATE;");
+        dbgit("commit");
+
+        // As the demo does it: 'other' goes into 'current' first, so the two share that commit through a merge.
+        dbgit("checkout", "current");
+        dbgit("merge", "other");
+        add("ALTER TABLE employees ALTER COLUMN department TYPE VARCHAR(10);");
+        dbgit("commit");
+
+        dbgit("checkout", "other");
+        add("ALTER TABLE employees ALTER COLUMN department TYPE VARCHAR(20);");
+        dbgit("commit");
+        assertTrue(cli.run("merge", "current").failed());
+
+        // Undo it by hand, in lower case: back to the type the shared CREATE TABLE declared.
+        add("ALTER TABLE employees ALTER COLUMN department TYPE varchar(100);");
+        dbgit("commit");
+
+        List<String> diff = dbgit("diff", "other", "current").out();
+        assertFalse(diff.stream().anyMatch(line -> line.contains("(conflicting)")), diff.toString());
+
+        CommandOutput merged = dbgit("merge", "current");
+        assertTrue(merged.out().getFirst().startsWith("Merged 'current' into 'other' as commit #"), merged.text());
+        assertEquals("10", schema.columnLength(databaseOf("other"), "employees", "department"));
+
+        // And with the merge done the two schemas agree: the histories still differ (other's retype and its undo
+        // are its own), so the diff keeps its header, but there is no table, column or index node left under it.
+        List<String> after = dbgit("diff", "other", "current").out();
+        assertEquals(List.of("other vs current"), after);
+    }
+
     @Test
     void aBranchCannotBeMergedIntoItself() {
         initialiseMain();
