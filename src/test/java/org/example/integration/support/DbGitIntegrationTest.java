@@ -91,8 +91,14 @@ public abstract class DbGitIntegrationTest {
 
     /** Points {@code main} at its tracked database, the way every demo script opens. */
     protected CommandOutput initialiseMain() {
-        return dbgit("init", "--host", "localhost", "--port", "5432",
-                "--database", TRACKED_DATABASE, "--user", "postgres", "--password", "postgres");
+        return dbgit(initArguments("integration-test"));
+    }
+
+    /** The connection every workspace in this test points {@code main} at; only {@code --author} varies per caller. */
+    private static String[] initArguments(String author) {
+        return new String[] {"init", "--host", "localhost", "--port", "5432",
+                "--database", TRACKED_DATABASE, "--user", "postgres", "--password", "postgres",
+                "--author", author};
     }
 
     /** Runs a {@code dbgit} command and insists it succeeded, reporting whatever it said if it did not. */
@@ -115,14 +121,19 @@ public abstract class DbGitIntegrationTest {
     }
 
     /**
-     * Another caller of the same daemon, with a {@code .dbgit} directory - and so a checked-out branch - of its
-     * own. What a concurrency test uses in place of the shell scripts' {@code new_workspace}/{@code dbgit_in}: the
-     * daemon holds no per-user state, so two workspaces talking to the one running daemon are genuinely
-     * independent callers, not a simulation of them.
+     * Another caller of the same daemon, with a {@code .dbgit} directory - and so a checked-out branch and an
+     * author - of its own. What a concurrency test uses in place of the shell scripts' {@code new_workspace}/
+     * {@code dbgit_in}: the daemon holds no per-user state, so two workspaces talking to the one running daemon
+     * are genuinely independent callers, not a simulation of them. Named {@code name}, and commits as {@code name}
+     * too - a caller switched workspaces, so its commits should say so - via the same {@code dbgit init --author}
+     * every workspace here uses, since that is the only place an author is ever set.
      */
     protected DbGitCli newWorkspace(String name) throws IOException {
         Path directory = Files.createDirectory(workspaceDirectory.resolve(name));
-        return cli.otherWorkspace(directory, daemon.port());
+        DbGitCli workspace = cli.otherWorkspace(directory, daemon.port());
+        CommandOutput init = workspace.run(initArguments(name));
+        assertTrue(init.succeeded(), () -> "dbgit init for workspace '" + name + "' failed: " + init.text());
+        return workspace;
     }
 
     private void serve() {

@@ -18,7 +18,7 @@ class RequestHeaderTest {
 
         RequestContext parsed = RequestHeader.parse(RequestHeader.render(request));
 
-        assertEquals("varun", parsed.user());
+        assertEquals("varun", parsed.author());
         assertEquals("feature/orders", parsed.branch());
         assertTrue(parsed.trackedDatabaseIfConfigured().isEmpty());
     }
@@ -64,14 +64,14 @@ class RequestHeaderTest {
     void missingFieldsFallBackRatherThanFailing() {
         RequestContext parsed = RequestHeader.parse("DBGIT/1");
 
-        assertEquals("unknown", parsed.user());
+        assertEquals("unknown", parsed.author());
         assertEquals(RequestContext.DEFAULT_BRANCH, parsed.branch());
     }
 
     @Test
     void aMalformedFieldIsNamed() {
         assertTrue(assertThrows(IllegalArgumentException.class,
-                () -> RequestHeader.parse("DBGIT/1 user=varun branch"))
+                () -> RequestHeader.parse("DBGIT/1 author=varun branch"))
                 .getMessage().contains("branch"));
     }
 }

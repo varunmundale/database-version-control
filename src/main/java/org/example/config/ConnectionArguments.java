@@ -16,6 +16,27 @@ public final class ConnectionArguments {
     private ConnectionArguments() {
     }
 
+    /**
+     * Pulls the required {@code --author <name>} out of an init argument list, so the rest can be parsed as a
+     * connection by {@link #parse}. {@code --author} sets the workspace's commit identity rather than describing a
+     * database, so it never reaches {@link ConnectionSettings} - the caller persists it separately.
+     *
+     * @param arguments mutated in place: the flag and its value are removed once found
+     * @return the author name
+     * @throws IllegalArgumentException if {@code --author} is missing
+     */
+    public static String extractAuthor(List<String> arguments) {
+        for (int index = 0; index < arguments.size(); index++) {
+            if (arguments.get(index).equals("--author")) {
+                String author = value(arguments, "--author", index + 1);
+                arguments.remove(index + 1);
+                arguments.remove(index);
+                return author;
+            }
+        }
+        throw new IllegalArgumentException("--author is required. " + usage());
+    }
+
     public static ConnectionSettings parse(List<String> arguments) {
         String host = null;
         String database = null;
@@ -46,7 +67,7 @@ public final class ConnectionArguments {
 
     public static String usage() {
         return "Usage: dbgit init --host <host> [--port " + DEFAULT_PORT
-                + "] --database <database> --user <user> [--password <password>]";
+                + "] --database <database> --user <user> [--password <password>] --author <name>";
     }
 
     private static String value(List<String> arguments, String flag, int index) {

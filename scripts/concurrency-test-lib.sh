@@ -2,8 +2,10 @@
 # Shared helpers for the concurrency test scripts. Sourced, not run.
 #
 # These drive the real ./dbgit client against a running ./dbService, so they exercise the whole stack: the wire
-# protocol, the request header, the thread pool and the branch locks. They deliberately never touch `main`, so no
-# `dbgit init` and no tracked database is needed - every branch they use is a fork in the scratchpad container.
+# protocol, the request header, the thread pool and the branch locks. Every branch they use is a fork in the
+# scratchpad container, never `main` itself - but `dbgit init` is still how a workspace's author is set (the only
+# way dbgit exposes one), so `new_workspace` points `main` at the same always-available scratchpad target every
+# demo script uses, purely to give each simulated caller a distinct commit identity.
 #
 # Requirements: ./dbService running, and Docker available for the shared PostgreSQL container.
 
@@ -13,6 +15,15 @@ RUN_ID="$$"
 WORKDIR="$(mktemp -d)"
 PASSED=0
 FAILED=0
+
+# The scratchpad container's own admin database - not `main`'s real target in production, but reachable without
+# any setup beyond what these tests already require, and every workspace pointing `main` at the same database is
+# harmless: only `--author` differs between them.
+INIT_HOST=localhost
+INIT_PORT=55432
+INIT_DATABASE=postgres
+INIT_DB_USER=postgres
+INIT_DB_PASSWORD=postgres
 
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -29,9 +40,14 @@ dbgit_add_in() {
     DBGIT_WORKSPACE="$1" "$DBGIT" add <<<"$2"
 }
 
+# A caller switched workspaces, so its commits should say so. `--author` only exists on `dbgit init`, so this is
+# also where every concurrency-test workspace ends up pointing `main` at the scratchpad target - an incidental
+# side effect nothing here reads back.
 new_workspace() {
     local workspace="$WORKDIR/$1"
     mkdir -p "$workspace"
+    dbgit_in "$workspace" init --host "$INIT_HOST" --port "$INIT_PORT" --database "$INIT_DATABASE" \
+        --user "$INIT_DB_USER" --password "$INIT_DB_PASSWORD" --author "$1" >/dev/null
     printf '%s' "$workspace"
 }
 
@@ -87,7 +103,11 @@ assert_not_contains() {
 }
 
 require_daemon() {
-    if ! dbgit_in "$(new_workspace probe)" branch >/dev/null 2>&1; then
+    # A plain `branch` needs only the daemon, not the scratchpad database `new_workspace`'s init also touches -
+    # so this stays a pure reachability check, independent of whether that target is up yet.
+    local probe="$WORKDIR/probe"
+    mkdir -p "$probe"
+    if ! dbgit_in "$probe" branch >/dev/null 2>&1; then
         printf 'dbService is not reachable. Start it first, in its own terminal:\n\n    ./dbService\n\n' >&2
         exit 2
     fi

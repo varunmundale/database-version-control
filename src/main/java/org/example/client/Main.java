@@ -8,13 +8,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The {@code dbgit} CLI. Beyond forwarding a command to the daemon it owns the two pieces of state that are the
- * user's rather than the service's: which branch this workspace is on, and how it reaches the database
- * {@code main} tracks. Both are written only after the daemon has accepted the command, so a rejected
- * {@code checkout} or an unreachable {@code init} leaves the workspace as it was.
+ * The {@code dbgit} CLI. Beyond forwarding a command to the daemon it owns the pieces of state that are the
+ * workspace's rather than the service's: which branch it is on, how it reaches the database {@code main} tracks,
+ * and the author it commits as. All three are written only once the daemon has accepted the command, so a
+ * rejected {@code checkout} or an unreachable {@code init} leaves the workspace as it was.
  */
 public class Main {
     /** Where {@code .dbgit} lives. The wrapper script sets this to the directory the user actually ran from. */
@@ -42,19 +43,22 @@ public class Main {
      * once the daemon confirms it can reach the database is it written to the workspace.
      */
     private static int init(ClientWorkspace workspace, DbGitClient client, List<String> arguments) {
+        List<String> rest = new ArrayList<>(arguments.subList(1, arguments.size()));
+        String author;
         ConnectionSettings settings;
         try {
-            settings = ConnectionArguments.parse(arguments.subList(1, arguments.size()));
+            author = ConnectionArguments.extractAuthor(rest);
+            settings = ConnectionArguments.parse(rest);
         } catch (IllegalArgumentException exception) {
             System.err.println(exception.getMessage());
             return 1;
         }
 
-        RequestContext request = new RequestContext(System.getProperty("user.name"),
-                workspace.currentBranch(), settings);
+        RequestContext request = new RequestContext(author, workspace.currentBranch(), settings);
         int exitCode = client.run(request, List.of("init"), System.out, System.err);
         if (exitCode == 0) {
             workspace.track(RequestContext.DEFAULT_BRANCH, settings);
+            workspace.trackAuthor(author);
         }
         return exitCode;
     }

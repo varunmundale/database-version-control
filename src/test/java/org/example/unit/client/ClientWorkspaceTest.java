@@ -12,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientWorkspaceTest {
@@ -56,13 +55,23 @@ class ClientWorkspaceTest {
     }
 
     @Test
-    void theRequestNamesTheUserAndTheBranchTheWorkspaceIsOn() {
+    void theRequestNamesTheBranchTheWorkspaceIsOnAndDefaultsTheAuthorToUnknown() {
         ClientWorkspace workspace = new ClientWorkspace(directory);
         workspace.checkout("feature/orders");
 
         RequestContext request = workspace.requestContext();
 
         assertEquals("feature/orders", request.branch());
-        assertFalse(request.user().isBlank());
+        assertEquals("unknown", request.author());
+    }
+
+    @Test
+    void theRequestCarriesTheWorkspacesConfiguredAuthorOnceOneIsSet() {
+        ClientWorkspace workspace = new ClientWorkspace(directory);
+
+        workspace.trackAuthor("demo-author");
+
+        assertEquals("demo-author", workspace.author().orElseThrow());
+        assertEquals("demo-author", workspace.requestContext().author());
     }
 }

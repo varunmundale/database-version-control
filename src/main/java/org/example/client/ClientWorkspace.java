@@ -23,6 +23,11 @@ import java.util.Optional;
  *
  * <p>{@code config.json} is the only place a password is written. The metadata store records what a branch tracks
  * so any workspace can check it agrees, but never how to authenticate to it.
+ *
+ * <p>{@code config.json} also holds this workspace's author identity, set by the required {@code dbgit init
+ * --author}. Nothing here falls back to the OS user - a workspace that has never run {@code init} sends no author
+ * at all, and {@link RequestContext} attributes its commits to {@code "unknown"} rather than guessing at an
+ * identity dbgit was never told.
  */
 public final class ClientWorkspace {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -37,10 +42,25 @@ public final class ClientWorkspace {
         this.configFile = directory.resolve("config.json");
     }
 
-    /** What this workspace sends with every request: who is asking, where they are, and how to reach what main tracks. */
+    /** What this workspace sends with every request: its configured author, where it is, and how to reach what main tracks. */
     public RequestContext requestContext() {
-        return new RequestContext(System.getProperty("user.name"), currentBranch(),
+        return new RequestContext(author().orElse(null), currentBranch(),
                 trackedConnection(RequestContext.DEFAULT_BRANCH).orElse(null));
+    }
+
+    /** This workspace's configured author identity, set via {@code dbgit init --author}, if any. */
+    public Optional<String> author() {
+        JsonNode author = readConfig().get("author");
+        return author == null || author.isNull() ? Optional.empty() : Optional.of(author.asText());
+    }
+
+    /** Sets this workspace's author identity, used to attribute commits from here on. */
+    public void trackAuthor(String author) {
+        Objects.requireNonNull(author, "author must not be null");
+        initialize();
+        ObjectNode root = readConfig();
+        root.put("author", author);
+        writeConfig(root);
     }
 
     /** The branch this workspace is on, defaulting to {@code main} in a directory dbgit hasn't been used in yet. */

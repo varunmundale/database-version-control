@@ -11,7 +11,7 @@ BRANCH="log-reset-demo/$$"
 
 # Reset local repo state so the branch this script creates starts fresh.
 rm -rf .dbgit/
-./dbgit init --host localhost --port 55432 --database postgres --user postgres --password postgres
+./dbgit init --host localhost --port 55432 --database postgres --user postgres --password postgres --author "log-reset-demo"
 
 ./dbgit checkout -b "$BRANCH"
 

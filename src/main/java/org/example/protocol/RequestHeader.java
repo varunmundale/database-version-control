@@ -13,7 +13,7 @@ import java.util.Map;
  * a {@link RequestContext} is written or read.
  *
  * <pre>
- * DBGIT/1 user=varun branch=feature/orders db-host=localhost db-port=5432 db-database=app db-user=varun db-password=s3cret
+ * DBGIT/1 author=varun branch=feature/orders db-host=localhost db-port=5432 db-database=app db-user=varun db-password=s3cret
  * </pre>
  *
  * <p>Values are percent-encoded, because a password may contain a space or an {@code =} and this line is split on
@@ -34,7 +34,7 @@ public final class RequestHeader {
 
     public static String render(RequestContext request) {
         StringBuilder header = new StringBuilder(PREFIX);
-        append(header, "user", request.user());
+        append(header, "author", request.author());
         append(header, "branch", request.branch());
         request.trackedDatabaseIfConfigured().ifPresent(tracked -> {
             append(header, "db-host", tracked.host());
@@ -63,7 +63,7 @@ public final class RequestHeader {
             }
             fields.put(pair.substring(0, separator), decode(pair.substring(separator + 1)));
         }
-        return new RequestContext(fields.get("user"), fields.get("branch"), trackedDatabase(fields));
+        return new RequestContext(fields.get("author"), fields.get("branch"), trackedDatabase(fields));
     }
 
     private static ConnectionSettings trackedDatabase(Map<String, String> fields) {

@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
@@ -62,11 +63,14 @@ public final class DbGitCli {
 
     /** The connection flags are the client's to parse; the workspace records them only once the daemon agrees. */
     private CommandOutput init(List<String> arguments) {
-        ConnectionSettings settings = ConnectionArguments.parse(arguments.subList(1, arguments.size()));
-        RequestContext request = new RequestContext(System.getProperty("user.name"), workspace.currentBranch(), settings);
+        List<String> rest = new ArrayList<>(arguments.subList(1, arguments.size()));
+        String author = ConnectionArguments.extractAuthor(rest);
+        ConnectionSettings settings = ConnectionArguments.parse(rest);
+        RequestContext request = new RequestContext(author, workspace.currentBranch(), settings);
         CommandOutput output = send((out, err) -> client.run(request, List.of("init"), out, err));
         if (output.succeeded()) {
             workspace.track(RequestContext.DEFAULT_BRANCH, settings);
+            workspace.trackAuthor(author);
         }
         return output;
     }

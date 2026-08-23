@@ -89,7 +89,7 @@ public final class Merger {
             forker.branchDatabases().replay(connections.forBranch(request, currentBranch), otherOnly);
 
             long commitId = versioningService.createMergeCommit(currentBranch, otherBranch,
-                    CommitMetadata.by("Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));
+                    new CommitMetadata(request.author(), "Merge branch '" + otherBranch + "' into '" + currentBranch + "'"));
             return new MergeResult.Success(commitId, stagingBranch, otherOnly.size());
         } finally {
             discard(stagingBranch);

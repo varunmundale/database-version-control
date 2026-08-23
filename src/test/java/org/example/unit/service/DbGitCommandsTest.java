@@ -133,7 +133,8 @@ class DbGitCommandsTest {
 
         assertEquals(List.of("dbgit commit [-m <message>]",
                 "Folds the current branch's applied changesets into one new commit, chained onto the branch's "
-                        + "HEAD, attributed to whoever the daemon runs as."),
+                        + "HEAD, attributed to the caller's configured author ('dbgit init --author'), or "
+                        + "'unknown' if none was set."),
                 result.lines());
     }
 
@@ -428,7 +429,8 @@ class DbGitCommandsTest {
     void logShowsEachCommitsIdAuthorDateMessageAndChangesetsNewestFirst() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
-        String author = System.getProperty("user.name");
+        // "tester" is the user this session's requests carry - see listener(). Not the OS user running this JVM.
+        String author = "tester";
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
         dbgit.execute("dbgit commit -m create the orders table");
         dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
@@ -491,7 +493,7 @@ class DbGitCommandsTest {
     }
 
     @Test
-    void commitDefaultsTheAuthorToWhoeverTheDaemonRunsAsAndAcceptsAnEmptyMessage() {
+    void commitDefaultsTheAuthorToTheCallersUserAndAcceptsAnEmptyMessage() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
@@ -499,7 +501,7 @@ class DbGitCommandsTest {
         dbgit.execute("dbgit commit");
 
         List<String> lines = dbgit.execute("dbgit log").lines();
-        assertTrue(lines.contains("Author:     " + System.getProperty("user.name")), lines.toString());
+        assertTrue(lines.contains("Author:     tester"), lines.toString());
         assertTrue(lines.contains("Message:    (none)"), lines.toString());
     }
 

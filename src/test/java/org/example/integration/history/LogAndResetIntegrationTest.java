@@ -46,7 +46,8 @@ class LogAndResetIntegrationTest extends DbGitIntegrationTest {
         assertEquals("  #3 [APPLIED] ALTER TABLE orders ADD COLUMN note TEXT;", log.get(3));
         // Newest commit first, each with who wrote it, why, and the changesets it folded in.
         assertEquals("commit #2", log.get(5));
-        assertEquals("Author:     " + System.getProperty("user.name"), log.get(6));
+        // The author comes from initialiseMain()'s 'dbgit init --author integration-test'.
+        assertEquals("Author:     integration-test", log.get(6));
         assertEquals("Message:    add a total column", log.get(8));
         assertEquals("  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);", log.get(10));
         assertEquals("commit #1", log.get(12));

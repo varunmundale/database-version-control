@@ -11,7 +11,8 @@ import java.util.Objects;
 
 /**
  * {@code dbgit commit [-m <message>]} - delegates folding the current branch's APPLIED changesets into one new
- * commit to {@link Committer}, attributing it to whoever the daemon runs as.
+ * commit to {@link Committer}, attributing it to the request's own author: the caller workspace's configured
+ * identity ({@code dbgit init --author}), or {@code "unknown"} if none was set.
  *
  * <p>The message is deliberately the rest of the line rather than a single argument: a command line arrives here
  * already split on whitespace, so the quotes a shell strips from {@code -m "add total column"} are long gone by
@@ -20,7 +21,8 @@ import java.util.Objects;
 public final class CommitCommand extends Command {
     public static final CommandUsage USAGE = new CommandUsage("commit", "dbgit commit [-m <message>]",
             "Folds the current branch's applied changesets into one new commit, chained onto the branch's HEAD, "
-                    + "attributed to whoever the daemon runs as.");
+                    + "attributed to the caller's configured author ('dbgit init --author'), or 'unknown' if "
+                    + "none was set.");
 
     private final Committer committer;
     private final List<String> arguments;
@@ -55,7 +57,7 @@ public final class CommitCommand extends Command {
                         + "Usage: dbgit commit [-m <message>]");
             }
         }
-        return CommitMetadata.by(String.join(" ", message));
+        return new CommitMetadata(context.request().author(), String.join(" ", message));
     }
 
     private static boolean isFlag(String argument) {

@@ -25,7 +25,7 @@ class IsolationIntegrationTest extends DbGitIntegrationTest {
 
     @Test
     void twoWorkspacesOnOneDaemonKeepSeparateCurrentBranches() throws Exception {
-        DbGitCli alice = cli;
+        DbGitCli alice = newWorkspace("alice");
         DbGitCli bob = newWorkspace("bob");
 
         must(alice.run("checkout", "-b", "alice-branch"));
@@ -44,7 +44,7 @@ class IsolationIntegrationTest extends DbGitIntegrationTest {
 
     @Test
     void workOnDifferentBranchesProceedsAtTheSameTime() throws Exception {
-        DbGitCli alice = cli;
+        DbGitCli alice = newWorkspace("alice");
         DbGitCli bob = newWorkspace("bob");
         must(alice.run("checkout", "-b", "alice-branch"));
         must(bob.run("checkout", "-b", "bob-branch"));

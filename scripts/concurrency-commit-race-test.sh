@@ -27,7 +27,9 @@ heading "$COMMITTERS clients adding and committing at once"
 # what must hold is that every one of them is still reachable by walking the branch's commits afterwards.
 for client in $(seq 1 "$COMMITTERS"); do
     workspace="$(new_workspace "committer-$client")"
-    cp -r "$owner/.dbgit" "$workspace/.dbgit"
+    # new_workspace already gave this committer its own config.json (author "committer-$client"); only HEAD needs
+    # to match the owner's, so this committer is on the right branch.
+    cp "$owner/.dbgit/HEAD" "$workspace/.dbgit/HEAD"
     (
         dbgit_add_in "$workspace" "ALTER TABLE orders ADD COLUMN col$client INT;" >/dev/null 2>&1
         dbgit_in "$workspace" commit -m "add col$client" >/dev/null 2>&1
