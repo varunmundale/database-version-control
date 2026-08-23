@@ -18,7 +18,7 @@ rm -rf .dbgit/
 
 # main is no longer an implicit scratchpad database - it tracks a real one, named here, and the
 # branches below are forked from it. Re-running this is harmless: the same target signs the same.
-./dbgit init --host localhost --port 55432 --database postgres --user postgres --password postgres --author "constraints-indexes-demo"
+./dbgit init --host localhost --port 5543 --database postgres --user postgres --password postgres --author "constraints-indexes-demo"
 
 echo "=== Starting on mybranch ==="
 ./dbgit checkout -b mybranch

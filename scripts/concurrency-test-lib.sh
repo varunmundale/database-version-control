@@ -20,7 +20,7 @@ FAILED=0
 # any setup beyond what these tests already require, and every workspace pointing `main` at the same database is
 # harmless: only `--author` differs between them.
 INIT_HOST=localhost
-INIT_PORT=55432
+INIT_PORT=5543
 INIT_DATABASE=postgres
 INIT_DB_USER=postgres
 INIT_DB_PASSWORD=postgres
