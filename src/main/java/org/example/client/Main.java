@@ -2,7 +2,7 @@ package org.example.client;
 
 import org.example.config.ConnectionArguments;
 import org.example.config.ConnectionSettings;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

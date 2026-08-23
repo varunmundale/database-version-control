@@ -1,4 +1,4 @@
-package org.example.protocol;
+package org.example.request;
 
 import org.example.config.ConnectionSettings;
 

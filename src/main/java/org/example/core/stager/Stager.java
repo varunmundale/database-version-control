@@ -5,7 +5,7 @@ import org.example.core.forker.Forker;
 import org.example.core.locking.BranchLease;
 import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 import org.example.models.schema.TableModel;
 import org.example.core.versioning.VersioningService;
 

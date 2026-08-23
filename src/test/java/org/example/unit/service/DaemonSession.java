@@ -5,7 +5,7 @@ import org.example.service.DbGitCommandListener;
 import org.example.service.DbGitCommandResult;
 import org.example.config.ConnectionArguments;
 import org.example.config.ConnectionSettings;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 
 import java.util.Arrays;
 import java.util.List;

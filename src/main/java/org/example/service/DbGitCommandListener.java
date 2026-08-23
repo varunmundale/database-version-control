@@ -7,7 +7,7 @@ import org.example.core.forker.Forker;
 import org.example.core.locking.AdvisoryBranchLock;
 import org.example.core.locking.BranchLocks;
 import org.example.core.replayer.Replayer;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 import org.example.service.command.AddCommand;
 import org.example.service.command.Command;
 import org.example.service.command.CommandContext;

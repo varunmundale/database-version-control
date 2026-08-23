@@ -1,8 +1,8 @@
 package org.example.service;
 
 import org.example.config.ConcurrencyConfig;
-import org.example.protocol.RequestContext;
-import org.example.protocol.RequestHeader;
+import org.example.request.RequestContext;
+import org.example.request.RequestHeader;
 import org.example.service.command.AddCommand;
 import org.example.service.command.CommandContext;
 import org.example.service.command.CommandFactory;

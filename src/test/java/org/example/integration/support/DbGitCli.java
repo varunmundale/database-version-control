@@ -4,7 +4,7 @@ import org.example.client.ClientWorkspace;
 import org.example.client.DbGitClient;
 import org.example.config.ConnectionArguments;
 import org.example.config.ConnectionSettings;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;

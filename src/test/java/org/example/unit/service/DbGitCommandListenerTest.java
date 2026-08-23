@@ -51,8 +51,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.example.config.ConcurrencyConfig;
 import org.example.unit.core.locking.TestBranchLocks;
-import org.example.protocol.RequestContext;
-import org.example.protocol.RequestHeader;
+import org.example.request.RequestContext;
+import org.example.request.RequestHeader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;

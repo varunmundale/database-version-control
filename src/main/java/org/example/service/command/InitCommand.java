@@ -4,7 +4,7 @@ import org.example.config.ConnectionSettings;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.connectors.SqlConnector;
 import org.example.core.locking.BranchLease;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 import org.example.service.DbGitCommandResult;
 
 import java.sql.SQLException;

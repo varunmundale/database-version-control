@@ -20,7 +20,7 @@ import org.example.models.versioning.CommitEntry;
 import org.example.models.versioning.Commit;
 import org.example.models.versioning.ChangesetStatus;
 import org.example.service.DbGitCommandListener;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 import org.example.core.versioning.VersioningService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

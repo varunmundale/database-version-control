@@ -3,7 +3,7 @@ package org.example.unit.client;
 
 import org.example.client.ClientWorkspace;
 import org.example.config.ConnectionSettings;
-import org.example.protocol.RequestContext;
+import org.example.request.RequestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

@@ -1,8 +1,8 @@
 package org.example.client;
 
 import org.example.config.ServiceEndpointConfig;
-import org.example.protocol.RequestContext;
-import org.example.protocol.RequestHeader;
+import org.example.request.RequestContext;
+import org.example.request.RequestHeader;
 
 import java.io.BufferedReader;
 import java.io.IOException;

@@ -1,8 +1,8 @@
-package org.example.unit.protocol;
+package org.example.unit.request;
 
 
-import org.example.protocol.RequestContext;
-import org.example.protocol.RequestHeader;
+import org.example.request.RequestContext;
+import org.example.request.RequestHeader;
 import org.example.config.ConnectionSettings;
 import org.junit.jupiter.api.Test;
 
