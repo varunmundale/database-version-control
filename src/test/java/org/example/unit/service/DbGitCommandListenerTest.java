@@ -50,7 +50,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.TestBranchLocks;
+import org.example.unit.core.locking.TestBranchLocks;
 import org.example.protocol.RequestContext;
 import org.example.protocol.RequestHeader;
 

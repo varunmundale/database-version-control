@@ -21,7 +21,7 @@ CREATE TABLE orders (
     placed_on DATE
 );
 EOF
-./dbgit commit -m create the orders table --author "$(whoami)"
+./dbgit commit -m create the orders table
 FIRST_COMMIT=$(./dbgit log | sed -n 's/^commit #\([0-9]*\).*/\1/p' | head -1)
 
 ./dbgit add <<'EOF'

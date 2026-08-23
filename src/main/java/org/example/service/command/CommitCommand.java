@@ -10,18 +10,17 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * {@code dbgit commit [-m <message>] [--author <name>]} - delegates folding the current branch's APPLIED
- * changesets into one new commit to {@link Committer}, attributing it to whoever asked for it.
+ * {@code dbgit commit [-m <message>]} - delegates folding the current branch's APPLIED changesets into one new
+ * commit to {@link Committer}, attributing it to whoever the daemon runs as.
  *
  * <p>The message is deliberately the rest of the line rather than a single argument: a command line arrives here
  * already split on whitespace, so the quotes a shell strips from {@code -m "add total column"} are long gone by
  * the time the daemon sees it.
  */
 public final class CommitCommand extends Command {
-    public static final CommandUsage USAGE = new CommandUsage("commit",
-            "dbgit commit [-m <message>] [--author <name>]",
-            "Folds the current branch's applied changesets into one new commit, chained onto the branch's HEAD. "
-                    + "--author overrides the default author (whoever the daemon runs as).");
+    public static final CommandUsage USAGE = new CommandUsage("commit", "dbgit commit [-m <message>]",
+            "Folds the current branch's applied changesets into one new commit, chained onto the branch's HEAD, "
+                    + "attributed to whoever the daemon runs as.");
 
     private final Committer committer;
     private final List<String> arguments;
@@ -44,7 +43,6 @@ public final class CommitCommand extends Command {
     }
 
     private CommitMetadata parse() {
-        String author = null;
         List<String> message = new ArrayList<>();
         for (int index = 0; index < arguments.size(); index++) {
             switch (arguments.get(index)) {
@@ -53,22 +51,14 @@ public final class CommitCommand extends Command {
                         message.add(arguments.get(++index));
                     }
                 }
-                case "--author" -> author = value("--author", ++index);
                 default -> throw new IllegalArgumentException("Unknown option '" + arguments.get(index) + "'. "
-                        + "Usage: dbgit commit [-m <message>] [--author <name>]");
+                        + "Usage: dbgit commit [-m <message>]");
             }
         }
-        return CommitMetadata.by(author, String.join(" ", message));
+        return CommitMetadata.by(String.join(" ", message));
     }
 
     private static boolean isFlag(String argument) {
-        return argument.equals("-m") || argument.equals("--message") || argument.equals("--author");
-    }
-
-    private String value(String flag, int index) {
-        if (index >= arguments.size()) {
-            throw new IllegalArgumentException(flag + " needs a value. Usage: dbgit commit [-m <message>] [--author <name>]");
-        }
-        return arguments.get(index);
+        return argument.equals("-m") || argument.equals("--message");
     }
 }

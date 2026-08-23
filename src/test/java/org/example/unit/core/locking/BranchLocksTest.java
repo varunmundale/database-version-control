@@ -5,7 +5,6 @@ import org.example.core.locking.AdvisoryBranchLock;
 import org.example.core.locking.BranchLease;
 import org.example.core.locking.BranchLock;
 import org.example.core.locking.BranchLocks;
-import org.example.core.locking.InMemoryBranchLock;
 import org.example.core.locking.LockTimeoutException;
 import org.junit.jupiter.api.Test;
 

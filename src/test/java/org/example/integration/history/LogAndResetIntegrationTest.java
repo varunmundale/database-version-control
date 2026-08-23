@@ -29,9 +29,9 @@ class LogAndResetIntegrationTest extends DbGitIntegrationTest {
                     id INT NOT NULL,
                     placed_on DATE
                 );""");
-        dbgit("commit", "-m", "create", "the", "orders", "table", "--author", "ada");
+        dbgit("commit", "-m", "create", "the", "orders", "table");
         add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
-        dbgit("commit", "-m", "add", "a", "total", "column", "--author", "ada");
+        dbgit("commit", "-m", "add", "a", "total", "column");
         add("ALTER TABLE orders ADD COLUMN note TEXT;");
     }
 
@@ -46,7 +46,7 @@ class LogAndResetIntegrationTest extends DbGitIntegrationTest {
         assertEquals("  #3 [APPLIED] ALTER TABLE orders ADD COLUMN note TEXT;", log.get(3));
         // Newest commit first, each with who wrote it, why, and the changesets it folded in.
         assertEquals("commit #2", log.get(5));
-        assertEquals("Author:     ada", log.get(6));
+        assertEquals("Author:     " + System.getProperty("user.name"), log.get(6));
         assertEquals("Message:    add a total column", log.get(8));
         assertEquals("  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);", log.get(10));
         assertEquals("commit #1", log.get(12));

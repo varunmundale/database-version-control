@@ -4,7 +4,7 @@ package org.example.unit.client;
 import org.example.client.DbGitClient;
 import org.example.core.forker.Forker;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.TestBranchLocks;
+import org.example.unit.core.locking.TestBranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;

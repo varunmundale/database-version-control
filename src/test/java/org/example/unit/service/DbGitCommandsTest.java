@@ -5,7 +5,7 @@ import org.example.service.DbGitCommandListener;
 import org.example.service.DbGitCommandResult;
 import org.example.core.forker.Forker;
 import org.example.config.ConcurrencyConfig;
-import org.example.core.locking.TestBranchLocks;
+import org.example.unit.core.locking.TestBranchLocks;
 import org.example.core.forker.docker.CommandResult;
 import org.example.core.forker.docker.CommandRunner;
 import org.example.config.ConnectionSettings;
@@ -131,9 +131,9 @@ class DbGitCommandsTest {
 
         DbGitCommandResult result = dbgit.execute("dbgit help commit");
 
-        assertEquals(List.of("dbgit commit [-m <message>] [--author <name>]",
+        assertEquals(List.of("dbgit commit [-m <message>]",
                 "Folds the current branch's applied changesets into one new commit, chained onto the branch's "
-                        + "HEAD. --author overrides the default author (whoever the daemon runs as)."),
+                        + "HEAD, attributed to whoever the daemon runs as."),
                 result.lines());
     }
 
@@ -428,10 +428,11 @@ class DbGitCommandsTest {
     void logShowsEachCommitsIdAuthorDateMessageAndChangesetsNewestFirst() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
+        String author = System.getProperty("user.name");
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
-        dbgit.execute("dbgit commit -m create the orders table --author ada");
+        dbgit.execute("dbgit commit -m create the orders table");
         dbgit.add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
-        dbgit.execute("dbgit commit -m add a total column --author grace");
+        dbgit.execute("dbgit commit -m add a total column");
 
         List<String> lines = dbgit.execute("dbgit log").lines();
 
@@ -443,14 +444,14 @@ class DbGitCommandsTest {
         assertTrue(second > 0 && first > second, "newest commit should come first: " + lines);
         assertEquals(List.of(
                 "commit #2",
-                "Author:     grace",
+                "Author:     " + author,
                 "Message:    add a total column",
                 "Changesets:",
                 "  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);"),
                 withoutDates(lines.subList(second, first)));
         assertEquals(List.of(
                 "commit #1",
-                "Author:     ada",
+                "Author:     " + author,
                 "Message:    create the orders table",
                 "Changesets:",
                 "  #1 CREATE TABLE orders (id INT NOT NULL);"),
