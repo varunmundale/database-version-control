@@ -11,8 +11,6 @@ import java.util.List;
  * daemon only ever sees the parsed result.
  */
 public final class ConnectionArguments {
-    private static final int DEFAULT_PORT = 5432;
-
     private ConnectionArguments() {
     }
 
@@ -41,15 +39,15 @@ public final class ConnectionArguments {
         String host = null;
         String database = null;
         String user = null;
-        String password = "";
-        int port = DEFAULT_PORT;
+        String password = null;
+        Integer port = null;
 
         List<String> unknown = new ArrayList<>();
         for (int index = 0; index < arguments.size(); index++) {
             String flag = arguments.get(index);
             switch (flag) {
                 case "--host" -> host = value(arguments, flag, ++index);
-                case "--port" -> port = Integer.parseInt(value(arguments, flag, ++index));
+                case "--port" -> port = parsePort(value(arguments, flag, ++index));
                 case "--database" -> database = value(arguments, flag, ++index);
                 case "--user" -> user = value(arguments, flag, ++index);
                 case "--password" -> password = value(arguments, flag, ++index);
@@ -59,15 +57,24 @@ public final class ConnectionArguments {
         if (!unknown.isEmpty()) {
             throw new IllegalArgumentException("Unknown option(s) " + unknown + ". " + usage());
         }
-        if (host == null || database == null || user == null) {
-            throw new IllegalArgumentException("--host, --database and --user are all required. " + usage());
+        if (host == null || database == null || user == null || port == null || password == null) {
+            throw new IllegalArgumentException(
+                    "--host, --port, --database, --user and --password are all required. " + usage());
         }
         return new ConnectionSettings(host, port, user, password, database);
     }
 
     public static String usage() {
-        return "Usage: dbgit init --host <host> [--port " + DEFAULT_PORT
-                + "] --database <database> --user <user> [--password <password>] --author <name>";
+        return "Usage: dbgit init --host <host> --port <port> --database <database> --user <user> "
+                + "--password <password> --author <name>";
+    }
+
+    private static int parsePort(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("--port must be a number. " + usage());
+        }
     }
 
     private static String value(List<String> arguments, String flag, int index) {

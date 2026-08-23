@@ -25,7 +25,7 @@ import java.util.Optional;
  */
 public final class InitCommand extends Command {
     public static final CommandUsage USAGE = new CommandUsage("init",
-            "dbgit init --host <host> [--port 5432] --database <database> --user <user> [--password <password>]"
+            "dbgit init --host <host> --port <port> --database <database> --user <user> --password <password>"
                     + " --author <name>",
             "Points 'main' at a real, already-existing database it tracks, and sets this workspace's commit "
                     + "author ('--author', required). Idempotent: re-running it against the same target just "
@@ -41,8 +41,8 @@ public final class InitCommand extends Command {
     public DbGitCommandResult execute() {
         ConnectionSettings settings = context.request().trackedDatabaseIfConfigured()
                 .orElseThrow(() -> new IllegalArgumentException("No connection details were sent with 'dbgit init'. "
-                        + "Usage: dbgit init --host <host> [--port 5432] --database <database> --user <user>"
-                        + " [--password <password>] --author <name>"));
+                        + "Usage: dbgit init --host <host> --port <port> --database <database> --user <user>"
+                        + " --password <password> --author <name>"));
         verifyReachable(settings);
 
         try (BranchLease ignored = context.locks().acquire(BRANCH)) {

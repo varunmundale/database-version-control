@@ -87,7 +87,7 @@ it running in its own terminal.
 ### 2. Point `main` at a real database (once per workspace)
 
 ```bash
-./dbgit init --host <host> [--port 5432] --database <database> --user <user> [--password <password>]
+./dbgit init --host <host> --port <port> --database <database> --user <user> --password <password>
 ```
 
 Idempotent — re-running it against the same target just refreshes the stored connection; pointing
@@ -136,7 +136,7 @@ echo "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);" | ./dbgit add
 
 | Command | Synopsis | What it does |
 |---|---|---|
-| `init` | `dbgit init --host <host> [--port 5432] --database <database> --user <user> [--password <password>]` | Points `main` at a real, already-existing database it tracks. |
+| `init` | `dbgit init --host <host> --port <port> --database <database> --user <user> --password <password>` | Points `main` at a real, already-existing database it tracks. |
 | `checkout` | `dbgit checkout <branch>` / `dbgit checkout -b <branch>` | Switches branches, or forks the current branch's database into a new one. |
 | `add` | `dbgit add <DDL statement (via stdin)>` | Stages one DDL statement and applies it to the current branch's live database. |
 | `commit` | `dbgit commit [-m <message>]` | Folds the current branch's applied changesets into one new commit. |

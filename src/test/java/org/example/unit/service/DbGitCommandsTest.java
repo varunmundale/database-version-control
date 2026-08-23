@@ -69,7 +69,8 @@ class DbGitCommandsTest {
             listeners.add(listener);
             DaemonSession session = new DaemonSession(listener, "tester");
             // main tracks a real database now, so point it at one before any test touches it.
-            session.execute("dbgit init --host localhost --port 5432 --database " + MAIN_DATABASE + " --user tester");
+            session.execute("dbgit init --host localhost --port 5432 --database " + MAIN_DATABASE
+                    + " --user tester --password tester");
             return session;
         } catch (IOException exception) {
             throw new UncheckedIOException(exception);
@@ -954,7 +955,8 @@ class DbGitCommandsTest {
     void initIsIdempotentForTheSameDatabase() {
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
-        String command = "dbgit init --host db.internal --port 6543 --database app_prod --user dbgit";
+        String command = "dbgit init --host db.internal --port 6543 --database app_prod --user dbgit"
+                + " --password secret";
 
         String firstSignature = dbgit.execute(command).lines().get(1);
         DbGitCommandResult second = dbgit.execute(command);
@@ -967,10 +969,12 @@ class DbGitCommandsTest {
     void initRepointsMainAtADifferentDatabase() {
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 new InMemoryMetadataStore()));
-        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
+        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit"
+                + " --password secret");
 
         DbGitCommandResult repointed = dbgit.execute(
-                "dbgit init --host db.internal --port 6543 --database app_staging --user dbgit");
+                "dbgit init --host db.internal --port 6543 --database app_staging --user dbgit"
+                        + " --password secret");
 
         assertTrue(repointed.lines().getFirst().contains("app_staging@db.internal:6543"), repointed.lines().toString());
         assertTrue(repointed.lines().getFirst().contains("was app_prod@db.internal:6543"), repointed.lines().toString());
@@ -983,7 +987,8 @@ class DbGitCommandsTest {
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(),
                 metadataStore));
 
-        dbgit.execute("dbgit init --host db.internal --database app_prod --user dbgit --password hunter2");
+        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit"
+                + " --password hunter2");
 
         TrackedDatabaseConfig tracked = metadataStore.trackedDatabase("main").orElseThrow();
         assertTrue(tracked.describe().contains("app_prod@db.internal"), tracked.describe());
@@ -996,7 +1001,8 @@ class DbGitCommandsTest {
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), connectorFactory,
                 new InMemoryMetadataStore()));
-        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit");
+        dbgit.execute("dbgit init --host db.internal --port 6543 --database app_prod --user dbgit"
+                + " --password secret");
 
         dbgit.add("CREATE TABLE orders (id INT NOT NULL);");
 
