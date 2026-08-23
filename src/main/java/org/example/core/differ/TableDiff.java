@@ -89,7 +89,7 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
         return matches;
     }
 
-    /** Package-private so {@link SchemaConflicts} can index the shared history's members the same way. */
+    /** Package-private so {@link SideChanges} can index the shared history's members the same way. */
     static <S extends SchemaElement<S>> Map<StableId, S> byId(List<S> members) {
         Map<StableId, S> byId = new LinkedHashMap<>();
         members.forEach(member -> byId.put(member.id(), member));

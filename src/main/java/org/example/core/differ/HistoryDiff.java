@@ -10,9 +10,9 @@ import java.util.Set;
 
 /**
  * What {@link Differ} found between two branches' commit histories: the changesets each side has and the other
- * doesn't, every table whose fully replayed schema differs, which of those differing objects both branches
- * actually changed since they diverged (the real conflicts - see {@link SchemaConflicts}), and - by
- * {@link StableId} - which of those exclusive statements touched each column, constraint or index. Everything a consumer of a diff needs and nothing about how
+ * doesn't, every table whose fully replayed schema differs, which side actually moved each of those differing
+ * objects since the branches diverged ({@link SideChanges}), and - by {@link StableId} - which of those exclusive
+ * statements touched each column, constraint or index. Everything a consumer of a diff needs and nothing about how
  * it is displayed: {@link HistoryDiffFormatter} renders this for {@code dbgit diff}, while
  * {@link org.example.core.merger.Merger} reads the same value for conflicts and for the changesets a merge has to
  * replay.
@@ -22,21 +22,22 @@ import java.util.Set;
  * diff at all.
  */
 public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, List<TableDiff> tables,
-                          Set<StableId> conflicts,
+                          SideChanges changes,
                           Map<StableId, List<ChangeSet>> leftStatements,
                           Map<StableId, List<ChangeSet>> rightStatements) {
     public HistoryDiff {
         Objects.requireNonNull(leftOnly, "leftOnly must not be null");
         Objects.requireNonNull(rightOnly, "rightOnly must not be null");
         Objects.requireNonNull(tables, "tables must not be null");
-        Objects.requireNonNull(conflicts, "conflicts must not be null");
+        Objects.requireNonNull(changes, "changes must not be null");
         Objects.requireNonNull(leftStatements, "leftStatements must not be null");
         Objects.requireNonNull(rightStatements, "rightStatements must not be null");
     }
 
     /** Two histories that carry exactly the same commits - nothing to report on either side. */
     static HistoryDiff identical() {
-        return new HistoryDiff(List.of(), List.of(), List.of(), Set.of(), Map.of(), Map.of());
+        return new HistoryDiff(List.of(), List.of(), List.of(), new SideChanges(Set.of(), Set.of()),
+                Map.of(), Map.of());
     }
 
     /**
@@ -45,7 +46,7 @@ public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, L
      * receive.
      */
     public boolean isConflicting(StableId id) {
-        return conflicts.contains(id);
+        return changes.conflicting(id);
     }
 
     /** True when neither branch has a commit the other lacks. */
@@ -53,13 +54,19 @@ public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, L
         return leftOnly.isEmpty() && rightOnly.isEmpty();
     }
 
-    /** The left branch's own statements against the object with this id, oldest first. */
+    /**
+     * The left branch's own statements against the object with this id, oldest first - and none at all unless the
+     * branch actually left the object somewhere new. A branch that retyped a column and then retyped it back has
+     * run statements against it but changed nothing, and reporting those under a difference it is not responsible
+     * for reads as though it were: the compensating statement that settled a conflict would still be shown as one
+     * side of it.
+     */
     public List<ChangeSet> leftStatements(StableId id) {
-        return leftStatements.getOrDefault(id, List.of());
+        return changes.changedLeft(id) ? leftStatements.getOrDefault(id, List.of()) : List.of();
     }
 
-    /** The right branch's own statements against the object with this id, oldest first. */
+    /** The right branch's own statements against the object with this id, on the same terms. */
     public List<ChangeSet> rightStatements(StableId id) {
-        return rightStatements.getOrDefault(id, List.of());
+        return changes.changedRight(id) ? rightStatements.getOrDefault(id, List.of()) : List.of();
     }
 }

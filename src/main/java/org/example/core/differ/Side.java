@@ -7,7 +7,7 @@ package org.example.core.differ;
  *
  * <p>{@link #BOTH} is deliberately not called a conflict. Whether two branches genuinely disagree about an object
  * cannot be read off the two sides alone - it depends on what the object looked like before they diverged, which
- * is {@link SchemaConflicts}' question, answered on the whole {@link HistoryDiff} rather than one pairing.
+ * is {@link SideChanges}' question, answered on the whole {@link HistoryDiff} rather than one pairing.
  */
 public enum Side {
     LEFT, RIGHT, BOTH;

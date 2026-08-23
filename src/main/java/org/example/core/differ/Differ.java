@@ -19,9 +19,8 @@ import java.util.stream.Collectors;
  * {@link org.example.core.merger.Merger} - a merge asks the same question a diff does (what does the other branch
  * have that this one doesn't, and does anything genuinely disagree), so it must get the same answer, computed the
  * same way. Everything else in this package is a collaborator: {@link Replayer} turns a history into schema,
- * {@link DatabaseDiff}/{@link TableDiff} compare two schemas, {@link SchemaConflicts} says which of the
- * differences both branches are responsible for, {@link HistoryDiff} is the result and
- * {@link HistoryDiffFormatter} renders it.
+ * {@link DatabaseDiff}/{@link TableDiff} compare two schemas, {@link SideChanges} says which branch each
+ * difference belongs to, {@link HistoryDiff} is the result and {@link HistoryDiffFormatter} renders it.
  *
  * <p>Divergence is a set difference by commit id, never a positional prefix: a commit id is unique and stable
  * regardless of where in a branch's own flattened history it turns up, and once either branch has been the target
@@ -29,10 +28,11 @@ import java.util.stream.Collectors;
  * contributions sort after the first parent's own unique commits. Comparing positions replayed already-shared
  * changesets a second time.
  *
- * <p>A difference is not a disagreement, so a conflict is decided against a third schema: the one the branches
- * shared when they diverged, replayed from the commits both of them carry. Comparing only the two sides made any
- * differing column a conflict, including one a branch had simply not received yet - which is why a branch reset
- * back to before its own change was still refused the merge that would have brought the other's in.
+ * <p>A difference is not a disagreement, and neither says whose it is, so both are decided against a third
+ * schema: the one the branches shared when they diverged, replayed from the commits both of them carry. Comparing
+ * only the two sides made any differing column a conflict, including one a branch had simply not received yet -
+ * which is why a branch reset back to before its own change was still refused the merge that would have brought
+ * the other's in.
  *
  * <p>Attribution - which statement touched which column, constraint or index - is worked out by replaying the
  * history one statement at a time and asking {@link TableDiff#between} what that statement changed about its
@@ -44,7 +44,6 @@ public final class Differ {
 
     private final Replayer replayer;
     private final DatabaseDiff databaseDiff;
-    private final SchemaConflicts schemaConflicts = new SchemaConflicts();
 
     public Differ() {
         this(new Replayer(), new DatabaseDiff());
@@ -72,7 +71,7 @@ public final class Differ {
         List<TableDiff> tables = databaseSnapshotDiff(leftHistory, rightHistory);
         Map<String, TableModel> base = replayer.replay(sharedChangesets(leftCommits, rightCommits));
 
-        return new HistoryDiff(leftOnly, rightOnly, tables, schemaConflicts.in(tables, base),
+        return new HistoryDiff(leftOnly, rightOnly, tables, SideChanges.since(base, tables),
                 attribute(leftHistory, idsOf(leftOnly)), attribute(rightHistory, idsOf(rightOnly)));
     }
 

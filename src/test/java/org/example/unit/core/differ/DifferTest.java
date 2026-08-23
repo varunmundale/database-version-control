@@ -107,6 +107,29 @@ class DifferTest {
         ), lines);
     }
 
+    /**
+     * The left branch retyped the column and then retyped it back - a compensating statement settling a conflict.
+     * It has run two statements against the column and changed nothing, so the node is the right branch's alone:
+     * listing the pair under a difference the left branch is not responsible for reads as though it still were.
+     * (The undo is written in lower case, which is the same definition - a type is keywords, not data.)
+     */
+    @Test
+    void aSideThatUndidItsOwnChangeContributesNoStatementsToTheNode() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
+        CommitEntry leftAlter = commit("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
+        CommitEntry leftUndo = commit("ALTER TABLE orders ALTER COLUMN total TYPE numeric(10,2);");
+        CommitEntry rightAlter = commit("ALTER TABLE orders ALTER COLUMN total TYPE INT;");
+
+        List<String> lines = diff("left", "right", List.of(create, leftAlter, leftUndo), List.of(create, rightAlter));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- orders",
+                "  |- total",
+                "    |- < ALTER TABLE orders ALTER COLUMN total TYPE INT;"
+        ), lines);
+    }
+
     @Test
     void aConflictingColumnIsLabeledAndListsBothSidesStatementsUnderneathIt() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
