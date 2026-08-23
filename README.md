@@ -158,3 +158,7 @@ branching, conflicting and non-conflicting merges, constraints/indexes, `log`/`r
 a check to run - one story told end to end, from two branches diverging to a conflict and the two
 ways of resolving it. (`scripts/live-demo.sh` is the same story as raw notes, not runnable as a
 script.)
+
+`scripts/live-demo-concurrency.sh` is the branch-lock demo, in the same spirit. It only prepares the
+ground - a branch whose table holds a few million rows - and then prints the commands to type in two
+terminals: five `dbgit add`s racing for one column, of which exactly one wins, and a real
