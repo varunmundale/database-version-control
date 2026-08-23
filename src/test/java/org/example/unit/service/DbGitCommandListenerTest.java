@@ -456,7 +456,7 @@ class DbGitCommandListenerTest {
             for (long commitId : chain) {
                 List<ChangeSet> changesets = changesetIdsByCommit.getOrDefault(commitId, List.<Long>of()).stream()
                         .map(changesetsById::get).toList();
-                entries.add(new CommitEntry(new Commit(commitId, new CommitMetadata("tester", ""), Instant.now(),
+                entries.add(new CommitEntry(new Commit(commitId, branch, new CommitMetadata("tester", ""), Instant.now(),
                         new CommitParents(parentCommitById.get(commitId), null)), changesets));
             }
             return entries;

@@ -19,12 +19,17 @@ import java.util.List;
  *   #5 [APPLIED] ALTER TABLE orders ADD COLUMN note TEXT;
  *
  * commit #3
+ * Branch:     feature/orders
  * Author:     varun
  * Date:       2026-08-22T10:15:30Z
  * Message:    add a total column
  * Changesets:
  *   #4 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);
  * </pre>
+ *
+ * <p>{@code Branch} is the branch the commit was made on, which is not necessarily the branch being logged: a
+ * fork inherits its parent's commits and a merge brings in another branch's, so this is what separates a branch's
+ * own commits from the ones it merely shares.
  *
  * <p>A changeset's DDL is collapsed onto one line - it is stored exactly as written, newlines included, and a log
  * is read line by line.
@@ -63,6 +68,7 @@ public final class HistoryLogFormatter {
         Commit commit = entry.commit();
         List<String> lines = new ArrayList<>();
         lines.add("commit #" + commit.id() + (commit.isMerge() ? " (merge)" : ""));
+        lines.add("Branch:     " + commit.branch());
         lines.add("Author:     " + commit.author());
         lines.add("Date:       " + commit.createdAt().truncatedTo(ChronoUnit.SECONDS));
         lines.add("Message:    " + (commit.message().isBlank() ? "(none)" : commit.message()));

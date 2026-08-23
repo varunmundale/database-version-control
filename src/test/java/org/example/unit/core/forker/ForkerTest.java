@@ -230,7 +230,7 @@ class ForkerTest {
             List<ChangeSet> history = commitHistoryByBranch.getOrDefault(branch, List.of());
             return history.isEmpty()
                     ? List.of()
-                    : List.of(new CommitEntry(new Commit(1, new CommitMetadata("tester", "seeded"), Instant.now(),
+                    : List.of(new CommitEntry(new Commit(1, branch, new CommitMetadata("tester", "seeded"), Instant.now(),
                             new CommitParents(null, null)), history));
         }
 

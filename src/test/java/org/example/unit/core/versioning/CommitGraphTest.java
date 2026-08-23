@@ -100,7 +100,7 @@ class CommitGraphTest {
     }
 
     private static Commit commit(long id, Long parent, Long secondParent) {
-        return new Commit(id, new CommitMetadata("tester", "message"), Instant.EPOCH,
+        return new Commit(id, "test", new CommitMetadata("tester", "message"), Instant.EPOCH,
                 new CommitParents(parent, secondParent));
     }
 }

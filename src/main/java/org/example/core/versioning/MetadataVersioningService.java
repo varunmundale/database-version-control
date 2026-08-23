@@ -112,7 +112,7 @@ public final class MetadataVersioningService implements VersioningService {
         }
         return database.transaction("Could not commit branch '" + branch + "'", () -> {
             Long headCommitId = branchRepository.findHeadCommitId(branch);
-            long commitId = commitRepository.insert(headCommitId, null, metadata);
+            long commitId = commitRepository.insert(branch, headCommitId, null, metadata);
             moveHead(branch, headCommitId, commitId);
             changesetRepository.markCommitted(changesetIds, commitId);
             return commitId;
@@ -127,7 +127,7 @@ public final class MetadataVersioningService implements VersioningService {
             if (secondParent == null) {
                 throw new VersioningException("Branch '" + otherBranch + "' has no commits to merge.");
             }
-            long commitId = commitRepository.insert(firstParent, secondParent, metadata);
+            long commitId = commitRepository.insert(branch, firstParent, secondParent, metadata);
             moveHead(branch, firstParent, commitId);
             return commitId;
         });

@@ -46,13 +46,32 @@ class LogAndResetIntegrationTest extends DbGitIntegrationTest {
         assertEquals("  #3 [APPLIED] ALTER TABLE orders ADD COLUMN note TEXT;", log.get(3));
         // Newest commit first, each with who wrote it, why, and the changesets it folded in.
         assertEquals("commit #2", log.get(5));
+        // Where the commit was made, which is what tells a branch's own commits from the ones it inherited.
+        assertEquals("Branch:     " + BRANCH, log.get(6));
         // The author comes from initialiseMain()'s 'dbgit init --author integration-test'.
-        assertEquals("Author:     integration-test", log.get(6));
-        assertEquals("Message:    add a total column", log.get(8));
-        assertEquals("  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);", log.get(10));
-        assertEquals("commit #1", log.get(12));
-        assertEquals("Message:    create the orders table", log.get(15));
+        assertEquals("Author:     integration-test", log.get(7));
+        assertEquals("Message:    add a total column", log.get(9));
+        assertEquals("  #2 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);", log.get(11));
+        assertEquals("commit #1", log.get(13));
+        assertEquals("Message:    create the orders table", log.get(17));
         assertTrue(log.contains("Changesets:"));
+    }
+
+    /**
+     * The commit graph is shared, so a fork's log shows commits it never made. Each one names the branch it was
+     * actually created on - the parent's for what was inherited, the fork's own for what it committed itself.
+     */
+    @Test
+    void eachCommitInTheLogNamesTheBranchItWasCreatedOn() {
+        twoCommitsAndAWorkingSet();
+        dbgit("checkout", "-b", "log-fork");
+        add("ALTER TABLE orders ADD COLUMN sku VARCHAR(50);");
+        dbgit("commit", "-m", "add", "a", "sku", "column");
+
+        List<String> log = dbgit("log").out();
+
+        assertEquals(List.of("Branch:     log-fork", "Branch:     " + BRANCH, "Branch:     " + BRANCH),
+                log.stream().filter(line -> line.startsWith("Branch:")).toList());
     }
 
     @Test

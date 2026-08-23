@@ -16,6 +16,12 @@ ALTER TABLE branch_commits
 ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS author TEXT;
 ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS message TEXT;
 
+-- The branch a commit was created on, so a log can say where each commit in a branch's inherited history actually
+-- came from. Deliberately not a foreign key: the commit graph is shared and outlives branches (a merge's staging
+-- branch is dropped as soon as the merge settles), and a commit must not keep a finished branch alive. Commits
+-- created before this column existed read back as unknown.
+ALTER TABLE branch_commits ADD COLUMN IF NOT EXISTS branch_name TEXT;
+
 -- A commit can have several children - that is what branching is - so a single forward pointer could never be
 -- right. Nothing read it (ancestry walks parent_commit_id), while two branches sharing a HEAD both wrote it,
 -- holding locks on different branches. Children are derivable from the parent columns if ever needed.

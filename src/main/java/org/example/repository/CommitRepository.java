@@ -22,6 +22,7 @@ public final class CommitRepository {
     private static final Field<Long> ID = DSL.field("id", SQLDataType.BIGINT);
     private static final Field<Long> PARENT_COMMIT_ID = DSL.field("parent_commit_id", SQLDataType.BIGINT);
     private static final Field<Long> SECOND_PARENT_COMMIT_ID = DSL.field("second_parent_commit_id", SQLDataType.BIGINT);
+    private static final Field<String> BRANCH_NAME = DSL.field("branch_name", SQLDataType.CLOB);
     private static final Field<String> AUTHOR = DSL.field("author", SQLDataType.CLOB);
     private static final Field<String> MESSAGE = DSL.field("message", SQLDataType.CLOB);
     private static final Field<OffsetDateTime> CREATED_AT = DSL.field("created_at", SQLDataType.TIMESTAMPWITHTIMEZONE);
@@ -33,10 +34,14 @@ public final class CommitRepository {
         return INSTANCE;
     }
 
-    /** Inserts a commit with the given parent(s) - {@code secondParentCommitId} non-null only for a merge commit - and returns its generated id. */
-    public long insert(Long parentCommitId, Long secondParentCommitId, CommitMetadata metadata) {
-        return dsl().insertInto(TABLE, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE)
-                .values(parentCommitId, secondParentCommitId, metadata.author(), metadata.message())
+    /**
+     * Inserts a commit made on {@code branch} with the given parent(s) - {@code secondParentCommitId} non-null only
+     * for a merge commit - and returns its generated id. The branch is stored as plain text rather than a
+     * reference: the commit outlives it.
+     */
+    public long insert(String branch, Long parentCommitId, Long secondParentCommitId, CommitMetadata metadata) {
+        return dsl().insertInto(TABLE, BRANCH_NAME, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE)
+                .values(branch, parentCommitId, secondParentCommitId, metadata.author(), metadata.message())
                 .returning(ID)
                 .fetchOne(ID);
     }
@@ -44,13 +49,13 @@ public final class CommitRepository {
     /** Every commit, keyed by id - the raw material a branch's history is walked out of, and what {@code dbgit log} reads. */
     public Map<Long, Commit> findAll() {
         Map<Long, Commit> commits = new HashMap<>();
-        dsl().select(ID, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE, CREATED_AT).from(TABLE)
+        dsl().select(ID, BRANCH_NAME, PARENT_COMMIT_ID, SECOND_PARENT_COMMIT_ID, AUTHOR, MESSAGE, CREATED_AT).from(TABLE)
                 .forEach(row -> commits.put(row.get(ID), toCommit(row)));
         return commits;
     }
 
     private static Commit toCommit(Record row) {
-        return new Commit(row.get(ID),
+        return new Commit(row.get(ID), row.get(BRANCH_NAME),
                 new CommitMetadata(row.get(AUTHOR), row.get(MESSAGE)),
                 row.get(CREATED_AT).toInstant(),
                 new CommitParents(row.get(PARENT_COMMIT_ID), row.get(SECOND_PARENT_COMMIT_ID)));

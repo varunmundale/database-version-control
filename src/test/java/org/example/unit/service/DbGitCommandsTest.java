@@ -427,7 +427,7 @@ class DbGitCommandsTest {
     }
 
     @Test
-    void logShowsEachCommitsIdAuthorDateMessageAndChangesetsNewestFirst() {
+    void logShowsEachCommitsIdBranchAuthorDateMessageAndChangesetsNewestFirst() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new RecordingConnectorFactory(), metadataStore));
         // "tester" is the user this session's requests carry - see listener(). Not the OS user running this JVM.
@@ -447,6 +447,7 @@ class DbGitCommandsTest {
         assertTrue(second > 0 && first > second, "newest commit should come first: " + lines);
         assertEquals(List.of(
                 "commit #2",
+                "Branch:     main",
                 "Author:     " + author,
                 "Message:    add a total column",
                 "Changesets:",
@@ -454,6 +455,7 @@ class DbGitCommandsTest {
                 withoutDates(lines.subList(second, first)));
         assertEquals(List.of(
                 "commit #1",
+                "Branch:     main",
                 "Author:     " + author,
                 "Message:    create the orders table",
                 "Changesets:",
@@ -815,6 +817,7 @@ class DbGitCommandsTest {
         private final Map<Long, List<Long>> changesetIdsByCommit = new LinkedHashMap<>();
         private final Map<Long, Long> parentCommitById = new HashMap<>();
         private final Map<Long, Long> secondParentCommitById = new HashMap<>();
+        private final Map<Long, String> branchByCommit = new HashMap<>();
         private final Map<Long, CommitMetadata> metadataByCommit = new HashMap<>();
         private final Map<String, Long> headCommitByBranch = new HashMap<>();
         private final AtomicLong nextChangesetId = new AtomicLong(1);
@@ -872,7 +875,8 @@ class DbGitCommandsTest {
             for (long commitId : order) {
                 List<ChangeSet> changesets = changesetIdsByCommit.getOrDefault(commitId, List.<Long>of()).stream()
                         .map(changesetsById::get).toList();
-                Commit commit = new Commit(commitId, metadataByCommit.get(commitId), Instant.now(),
+                Commit commit = new Commit(commitId, branchByCommit.get(commitId), metadataByCommit.get(commitId),
+                        Instant.now(),
                         new CommitParents(parentCommitById.get(commitId), secondParentCommitById.get(commitId)));
                 entries.add(new CommitEntry(commit, changesets));
             }
@@ -902,6 +906,7 @@ class DbGitCommandsTest {
                     .toList();
             long commitId = nextCommitId.getAndIncrement();
             parentCommitById.put(commitId, headCommitByBranch.get(branch));
+            branchByCommit.put(commitId, branch);
             metadataByCommit.put(commitId, metadata);
             headCommitByBranch.put(branch, commitId);
             changesetIdsByCommit.put(commitId, applied);
@@ -917,6 +922,7 @@ class DbGitCommandsTest {
             long commitId = nextCommitId.getAndIncrement();
             parentCommitById.put(commitId, headCommitByBranch.get(branch));
             secondParentCommitById.put(commitId, headCommitByBranch.get(otherBranch));
+            branchByCommit.put(commitId, branch);
             metadataByCommit.put(commitId, metadata);
             headCommitByBranch.put(branch, commitId);
             return commitId;

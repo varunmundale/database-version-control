@@ -210,7 +210,7 @@ class DifferTest {
     /** One commit carrying a single changeset - fine-grained enough that reusing the same {@link CommitEntry}
      * instance on both sides is exactly "this commit is shared", matching the old prefix-based tests' granularity. */
     private CommitEntry commit(ChangeSet changeset) {
-        return new CommitEntry(new Commit(commitIdSequence++, null, Instant.now(), null), List.of(changeset));
+        return new CommitEntry(new Commit(commitIdSequence++, "test", null, Instant.now(), null), List.of(changeset));
     }
 
     private CommitEntry commit(String ddl) {
