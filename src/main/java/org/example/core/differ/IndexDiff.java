@@ -4,10 +4,11 @@ import org.example.models.schema.IndexModel;
 import org.example.models.schema.StableId;
 
 /**
- * One index, matched by stable id, that differs between two sides - see {@link #side()}. A {@link Side#CONFLICT}
- * means both branches have an index of this name but defined differently, e.g. unique on one side only.
+ * One index, matched by stable id, that differs between two sides - see {@link #side()}. {@link Side#BOTH} means
+ * both branches have an index of this name but defined differently, e.g. unique on one side only - a conflict only
+ * if both of them changed it ({@link SchemaConflicts}).
  */
-public record IndexDiff(StableId id, IndexModel left, IndexModel right) implements Sided<IndexModel> {
+public record IndexDiff(StableId id, IndexModel left, IndexModel right) implements ElementDiff<IndexModel> {
     public IndexDiff {
         Side.of(left, right); // validates at least one side is present
     }

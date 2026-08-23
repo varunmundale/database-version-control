@@ -76,7 +76,7 @@ class DatabaseDiffTest {
         assertFalse(tableDiff.onlyOnRight());
         assertEquals(1, tableDiff.columnDiffs().size());
         ColumnDiff columnDiff = tableDiff.columnDiffs().getFirst();
-        assertEquals(Side.CONFLICT, columnDiff.side());
+        assertEquals(Side.BOTH, columnDiff.side());
         assertEquals("total", columnDiff.columnName());
         assertFalse(columnDiff.isRename());
     }
@@ -105,7 +105,7 @@ class DatabaseDiffTest {
 
         assertEquals(1, tableDiffs.size());
         ColumnDiff columnDiff = tableDiffs.getFirst().columnDiffs().getFirst();
-        assertEquals(Side.CONFLICT, columnDiff.side());
+        assertEquals(Side.BOTH, columnDiff.side());
         assertTrue(columnDiff.isRename());
         assertEquals("col2", columnDiff.left().name());
         assertEquals("col1", columnDiff.right().name());

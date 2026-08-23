@@ -3,7 +3,6 @@ package org.example.core.merger;
 import org.example.core.differ.DatabaseDiff;
 import org.example.core.differ.Differ;
 import org.example.core.differ.HistoryDiff;
-import org.example.core.differ.Side;
 import org.example.core.differ.TableDiff;
 import org.example.core.forker.BranchConnections;
 import org.example.core.forker.Forker;
@@ -99,22 +98,23 @@ public final class Merger {
     }
 
     /**
-     * Everything {@link Differ} found genuinely conflicting (matched by stable id) between the two branches' fully
-     * replayed schemas: a column, constraint or index both branches changed in incompatible ways. Named for the
-     * user rather than rendered as a tree - a merge reports why it stopped, it does not draw the diff.
+     * Everything {@link Differ} found genuinely conflicting between the two branches: a column, constraint or index
+     * both of them changed since they diverged, matched by stable id. A difference only one branch is responsible
+     * for is not here - that is exactly what the merge is bringing in. Named for the user rather than rendered as
+     * a tree: a merge reports why it stopped, it does not draw the diff.
      */
     private static List<String> conflicts(HistoryDiff diff) {
         List<String> lines = new ArrayList<>();
         for (TableDiff tableDiff : diff.tables()) {
             String table = "table '" + tableDiff.tableName() + "', ";
             tableDiff.columnDiffs().stream()
-                    .filter(columnDiff -> columnDiff.side() == Side.CONFLICT)
+                    .filter(columnDiff -> diff.isConflicting(columnDiff.id()))
                     .forEach(columnDiff -> lines.add(table + "column '" + columnDiff.columnName() + "'"));
             tableDiff.constraintDiffs().stream()
-                    .filter(constraintDiff -> constraintDiff.side() == Side.CONFLICT)
+                    .filter(constraintDiff -> diff.isConflicting(constraintDiff.id()))
                     .forEach(constraintDiff -> lines.add(table + "constraint '" + constraintDiff.constraintName() + "'"));
             tableDiff.indexDiffs().stream()
-                    .filter(indexDiff -> indexDiff.side() == Side.CONFLICT)
+                    .filter(indexDiff -> diff.isConflicting(indexDiff.id()))
                     .forEach(indexDiff -> lines.add(table + "index '" + indexDiff.indexName() + "'"));
         }
         return lines;

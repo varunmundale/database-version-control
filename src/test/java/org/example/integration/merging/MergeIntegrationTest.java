@@ -263,6 +263,56 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
         assertEquals(List.of("id", "name", "sku", "owner"), schema.columns(databaseOf("mb1"), "products"));
     }
 
+    /**
+     * Resolving a conflict the other way round: instead of adding a compensating statement, the branch resets away
+     * its own conflicting commit. Once it has, only the other branch has touched the column, so there is nothing
+     * left to disagree about and the merge simply brings that change in.
+     *
+     * <p>This used to fail. A conflict was decided by comparing the two branches' schemas alone, so a column that
+     * read {@code VARCHAR(20)} on one side and {@code VARCHAR(10)} on the other was called a conflict no matter
+     * which of them had changed it - and the reset, which had put the column back exactly as the shared history
+     * left it, changed nothing about that answer.
+     */
+    @Test
+    void resettingAwayTheConflictingCommitLetsTheMergeThroughAndBringsInTheOtherBranchsChange() {
+        initialiseMain();
+        dbgit("checkout", "-b", "current");
+        add("""
+                CREATE TABLE employees (
+                    id SERIAL,
+                    name VARCHAR(100) NOT NULL,
+                    department VARCHAR(100)
+                );""");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "other");
+        add("ALTER TABLE employees ADD COLUMN other_column DATE;");
+        String otherOwnCommit = dbgit("commit").out().getFirst().replaceAll("^Created commit #(\\d+).*$", "$1");
+
+        // Both branches retype the same column, incompatibly.
+        dbgit("checkout", "current");
+        add("ALTER TABLE employees ALTER COLUMN department TYPE VARCHAR(10);");
+        dbgit("commit");
+
+        dbgit("checkout", "other");
+        add("ALTER TABLE employees ALTER COLUMN department TYPE VARCHAR(20);");
+        dbgit("commit");
+
+        CommandOutput rejected = cli.run("merge", "current");
+        assertTrue(rejected.failed(), rejected.text());
+        assertTrue(rejected.mentions("conflicting changes to table 'employees', column 'department'"), rejected.text());
+
+        // Reset 'other' back to its own last commit, dropping its retype. Now only 'current' has touched the column.
+        dbgit("reset", otherOwnCommit);
+        List<String> diff = dbgit("diff", "other", "current").out();
+        assertTrue(diff.contains("  |- department"), diff.toString());
+        assertFalse(diff.stream().anyMatch(line -> line.contains("(conflicting)")), diff.toString());
+
+        CommandOutput merged = dbgit("merge", "current");
+        assertTrue(merged.out().getFirst().startsWith("Merged 'current' into 'other' as commit #"), merged.text());
+        assertEquals("10", schema.columnLength(databaseOf("other"), "employees", "department"));
+    }
+
     @Test
     void aBranchCannotBeMergedIntoItself() {
         initialiseMain();

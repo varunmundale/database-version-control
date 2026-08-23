@@ -46,6 +46,16 @@ public final class DatabaseSchema {
         return types.isEmpty() ? null : types.getFirst();
     }
 
+    /**
+     * A character column's declared length - what tells {@code VARCHAR(10)} from {@code VARCHAR(20)}, which
+     * {@link #columnType} cannot, both being {@code character varying}.
+     */
+    public String columnLength(String database, String table, String column) {
+        List<String> lengths = query(database, "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_NAME = ? AND COLUMN_NAME = ?", table, column);
+        return lengths.isEmpty() ? null : lengths.getFirst();
+    }
+
     public List<String> constraints(String database, String table) {
         return query(database, "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS"
                 + " WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_NAME = ? ORDER BY CONSTRAINT_NAME", table);

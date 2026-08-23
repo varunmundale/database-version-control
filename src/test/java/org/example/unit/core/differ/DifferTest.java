@@ -68,6 +68,45 @@ class DifferTest {
         ), lines);
     }
 
+    /**
+     * Only the right branch retyped the column; the left carries it exactly as the shared commit left it. The two
+     * schemas disagree, but nobody has to choose - which is what separates a merge that can proceed from one that
+     * cannot, and what comparing the two sides alone got wrong.
+     */
+    @Test
+    void aColumnOnlyOneSideModifiedIsReportedButNotLabeledAsAConflict() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
+        CommitEntry rightAlter = commit("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;");
+
+        List<String> lines = diff("left", "right", List.of(create), List.of(create, rightAlter));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- orders",
+                "  |- total",
+                "    |- < ALTER TABLE orders ALTER COLUMN total TYPE BIGINT;"
+        ), lines);
+    }
+
+    /** The same shape one level down: a constraint redefined on one side only is not a conflict either. */
+    @Test
+    void aConstraintOnlyOneSideRedefinedIsNotLabeledAsAConflict() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, email TEXT);");
+        CommitEntry key = commit("ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (id);");
+        CommitEntry drop = commit("ALTER TABLE orders DROP CONSTRAINT orders_key;");
+        CommitEntry rightKey = commit("ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (email);");
+
+        List<String> lines = diff("left", "right", List.of(create, key), List.of(create, key, drop, rightKey));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- orders",
+                "  |- orders_key (UNIQUE)",
+                "    |- < ALTER TABLE orders DROP CONSTRAINT orders_key;",
+                "    |- < ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (email);"
+        ), lines);
+    }
+
     @Test
     void aConflictingColumnIsLabeledAndListsBothSidesStatementsUnderneathIt() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");

@@ -19,9 +19,8 @@ import java.util.Set;
  * One table, matched by name (a table rename is not tracked, so a renamed table shows up as one disappearing and a
  * different one appearing, not as a rename), and everything that differs about it between two sides: its columns,
  * its constraints and its indexes. Exactly one of {@code left}/{@code right} is {@code null} when the table exists
- * on only one side - see {@link #side()}. Note that {@link Side#CONFLICT} here just means "present on both sides";
- * unlike a {@link ColumnDiff}, that is not itself noteworthy - the three diff lists are what say whether the table
- * actually changed.
+ * on only one side - see {@link #side()}. {@link Side#BOTH} here just means "present on both sides", which is not
+ * itself noteworthy - the three diff lists are what say whether the table actually changed.
  *
  * <p>Matching a table's contents is this class's job, via {@link #between}: {@link DatabaseDiff} pairs up tables and
  * leaves each pairing to work out what changed inside it.
@@ -64,7 +63,7 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
 
     /** True when the table exists on both sides and nothing inside it differs - i.e. there is nothing to report. */
     public boolean isEmpty() {
-        return side() == Side.CONFLICT && columnDiffs.isEmpty() && constraintDiffs.isEmpty() && indexDiffs.isEmpty();
+        return side() == Side.BOTH && columnDiffs.isEmpty() && constraintDiffs.isEmpty() && indexDiffs.isEmpty();
     }
 
     /**
@@ -90,7 +89,8 @@ public record TableDiff(String tableName, TableModel left, TableModel right, Lis
         return matches;
     }
 
-    private static <S extends SchemaElement<S>> Map<StableId, S> byId(List<S> members) {
+    /** Package-private so {@link SchemaConflicts} can index the shared history's members the same way. */
+    static <S extends SchemaElement<S>> Map<StableId, S> byId(List<S> members) {
         Map<StableId, S> byId = new LinkedHashMap<>();
         members.forEach(member -> byId.put(member.id(), member));
         return byId;

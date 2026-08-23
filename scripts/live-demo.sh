@@ -116,20 +116,24 @@ ALTER TABLE employees ALTER COLUMN department TYPE varchar(10);
 ALTER TABLE employees ALTER COLUMN department TYPE varchar(20);
 ./dbgit commit
 
-./dbgit diff other current
+./dbgit diff other current #merge other-way round caused problems because the commit histories were LCA based. Converted this to Set-based filtering
 # merge onto other
 ./dbgit merge current # ----- here merge will fail because of department------
 
-#compensating statements
-./dbgit add
-ALTER TABLE employees ALTER COLUMN department TYPE varchar(100);
-./dbgit commit
+##compensating statements the two-way conflict dtector is insufficient to handle this
+#./dbgit add
+#ALTER TABLE employees ALTER COLUMN department TYPE varchar(100);
+#./dbgit commit
+#
+#./dbgit diff other current
+## merge onto other
+#./dbgit merge current
 
-./dbgit diff other current
-# merge onto other
+
+#Reset method to resolve conflict
+./dbgit log
+./dbgit reset 3
 ./dbgit merge current
-
-
 
 
 

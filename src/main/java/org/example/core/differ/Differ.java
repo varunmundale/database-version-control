@@ -19,7 +19,8 @@ import java.util.stream.Collectors;
  * {@link org.example.core.merger.Merger} - a merge asks the same question a diff does (what does the other branch
  * have that this one doesn't, and does anything genuinely disagree), so it must get the same answer, computed the
  * same way. Everything else in this package is a collaborator: {@link Replayer} turns a history into schema,
- * {@link DatabaseDiff}/{@link TableDiff} compare two schemas, {@link HistoryDiff} is the result and
+ * {@link DatabaseDiff}/{@link TableDiff} compare two schemas, {@link SchemaConflicts} says which of the
+ * differences both branches are responsible for, {@link HistoryDiff} is the result and
  * {@link HistoryDiffFormatter} renders it.
  *
  * <p>Divergence is a set difference by commit id, never a positional prefix: a commit id is unique and stable
@@ -27,6 +28,11 @@ import java.util.stream.Collectors;
  * of a merge, a shared commit sits at different indexes on the two sides - a merge commit's second-parent
  * contributions sort after the first parent's own unique commits. Comparing positions replayed already-shared
  * changesets a second time.
+ *
+ * <p>A difference is not a disagreement, so a conflict is decided against a third schema: the one the branches
+ * shared when they diverged, replayed from the commits both of them carry. Comparing only the two sides made any
+ * differing column a conflict, including one a branch had simply not received yet - which is why a branch reset
+ * back to before its own change was still refused the merge that would have brought the other's in.
  *
  * <p>Attribution - which statement touched which column, constraint or index - is worked out by replaying the
  * history one statement at a time and asking {@link TableDiff#between} what that statement changed about its
@@ -38,6 +44,7 @@ public final class Differ {
 
     private final Replayer replayer;
     private final DatabaseDiff databaseDiff;
+    private final SchemaConflicts schemaConflicts = new SchemaConflicts();
 
     public Differ() {
         this(new Replayer(), new DatabaseDiff());
@@ -50,8 +57,8 @@ public final class Differ {
 
     /**
      * Compares two branches by their commit histories, newest state against newest state: what each side alone
-     * carries, which tables actually differ once both histories are replayed in full, and which of those exclusive
-     * statements touched each object.
+     * carries, which tables actually differ once both histories are replayed in full, which of those differences
+     * both branches are responsible for, and which of those exclusive statements touched each object.
      */
     public HistoryDiff diff(List<CommitEntry> leftCommits, List<CommitEntry> rightCommits) {
         List<ChangeSet> leftOnly = exclusiveChangesets(leftCommits, rightCommits);
@@ -62,8 +69,24 @@ public final class Differ {
 
         List<ChangeSet> leftHistory = changesets(leftCommits);
         List<ChangeSet> rightHistory = changesets(rightCommits);
-        return new HistoryDiff(leftOnly, rightOnly, databaseSnapshotDiff(leftHistory, rightHistory),
+        List<TableDiff> tables = databaseSnapshotDiff(leftHistory, rightHistory);
+        Map<String, TableModel> base = replayer.replay(sharedChangesets(leftCommits, rightCommits));
+
+        return new HistoryDiff(leftOnly, rightOnly, tables, schemaConflicts.in(tables, base),
                 attribute(leftHistory, idsOf(leftOnly)), attribute(rightHistory, idsOf(rightOnly)));
+    }
+
+    /**
+     * The history both branches already share - every commit each of them carries - which is the schema they
+     * diverged from, and so the only thing that can say which side changed what. Taken in the left branch's own
+     * order: the shared commits are ancestry-closed on both sides, so either order replays the same schema.
+     */
+    private static List<ChangeSet> sharedChangesets(List<CommitEntry> left, List<CommitEntry> right) {
+        Set<Long> rightIds = right.stream().map(CommitEntry::commitId).collect(Collectors.toSet());
+        return left.stream()
+                .filter(entry -> rightIds.contains(entry.commitId()))
+                .flatMap(entry -> entry.changesets().stream())
+                .toList();
     }
 
     /** Every table that differs between the two fully replayed histories, ordered by table name. */

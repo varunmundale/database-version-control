@@ -32,7 +32,7 @@ class TableDiffTest {
         TableDiff tableDiff = TableDiff.between("orders", orders, orders);
 
         assertTrue(tableDiff.isEmpty());
-        assertEquals(Side.CONFLICT, tableDiff.side());
+        assertEquals(Side.BOTH, tableDiff.side());
         assertTrue(tableDiff.columnDiffs().isEmpty());
     }
 
@@ -71,7 +71,7 @@ class TableDiffTest {
         assertEquals(1, tableDiff.columnDiffs().size(), "a rename is one column that differs, not a drop plus an add");
         ColumnDiff columnDiff = tableDiff.columnDiffs().getFirst();
         assertTrue(columnDiff.isRename());
-        assertEquals(Side.CONFLICT, columnDiff.side());
+        assertEquals(Side.BOTH, columnDiff.side());
     }
 
     @Test
@@ -120,7 +120,7 @@ class TableDiffTest {
         TableDiff tableDiff = TableDiff.between("orders", left, right);
 
         assertEquals(1, tableDiff.constraintDiffs().size());
-        assertEquals(Side.CONFLICT, tableDiff.constraintDiffs().getFirst().side());
+        assertEquals(Side.BOTH, tableDiff.constraintDiffs().getFirst().side());
     }
 
     @Test
@@ -143,7 +143,7 @@ class TableDiffTest {
         TableDiff tableDiff = TableDiff.between("orders", left, right);
 
         assertEquals(List.of("idx_orders_total"), tableDiff.indexDiffs().stream().map(IndexDiff::indexName).toList());
-        assertEquals(Side.CONFLICT, tableDiff.indexDiffs().getFirst().side());
+        assertEquals(Side.BOTH, tableDiff.indexDiffs().getFirst().side());
         assertFalse(tableDiff.indexDiffs().getFirst().left().unique());
         assertTrue(tableDiff.indexDiffs().getFirst().right().unique());
     }
