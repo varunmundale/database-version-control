@@ -48,3 +48,6 @@ CLAUDE.md
 
 ### dbService logs ###
 logs/
+.dbgit-tmp/
+### live-demo scratch state (scripts/live-demo-concurrency.sh) ###
+*.tmp

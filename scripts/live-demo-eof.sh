@@ -137,3 +137,94 @@ echo "=== diff other current (no longer conflicting) ==="
 #     ./dbgit log
 #     ./dbgit reset "$other_own_commit"
 #     ./dbgit merge current
+
+########################################################################################
+# Renames.
+#
+# StableId is what makes a rename visible AS a rename: a column's id is assigned when the column is
+# first created and carried through RENAME COLUMN (SchemaOperationApplier.renameColumn keeps the id
+# and swaps only the name), so a diff matches the two sides by id and reports ONE column that moved -
+# not a column dropped on one side and a different one added on the other. Tables get no such
+# treatment: they are matched by name, so renaming a table does read as a drop plus an add.
+########################################################################################
+
+echo
+echo "=== current: an index over the column that is about to be renamed ==="
+./dbgit checkout current
+./dbgit add <<'EOF'
+CREATE INDEX employees_email_idx ON employees (email);
+EOF
+./dbgit commit
+
+echo
+echo "=== current: rename that column ==="
+./dbgit add <<'EOF'
+ALTER TABLE employees RENAME COLUMN email TO contact_email;
+EOF
+./dbgit commit
+
+echo
+echo "=== diff other current (a one-sided rename: one column moved, and it is not a conflict) ==="
+# One node for that column, not two, and no '(conflicting)' - only 'current' moved it. The index is
+# not reported as changed either: IndexModel holds the stable ids of the columns it covers rather
+# than their names, so it still covers the same column, now called contact_email.
+./dbgit diff other current
+
+echo
+echo "=== merge current into other ==="
+# Goes through: a one-sided rename is just a change the other branch does not have yet. The merge
+# replays current's raw statements in order - CREATE INDEX ... (email) before the rename - so other's
+# real database ends up where the model says it does, with employees_email_idx over contact_email.
+./dbgit checkout other
+./dbgit merge current
+./dbgit log
+
+echo
+echo "=== other: rename a different column ==="
+./dbgit add <<'EOF'
+ALTER TABLE employees RENAME COLUMN name TO full_name;
+EOF
+./dbgit commit
+
+echo
+echo "=== current: retype the SAME column ==="
+./dbgit checkout current
+./dbgit add <<'EOF'
+ALTER TABLE employees ALTER COLUMN name TYPE varchar(200);
+EOF
+./dbgit commit
+
+echo
+echo "=== diff other current (conflicting: both sides moved the same column, under two names) ==="
+# Without the id carried through the rename these would look like two unrelated columns, and the
+# merge would happily produce both. That is the same thing ColumnDiff.isRename exists to see.
+./dbgit diff other current
+
+echo
+echo "=== merge current into other (expected to be refused: both branches moved 'name') ==="
+./dbgit checkout other
+if ./dbgit merge current; then
+    echo "ERROR: expected the merge to be refused due to a rename conflict, but it succeeded." >&2
+    exit 1
+fi
+echo "--> Merge was refused, as expected (see the error above)."
+
+echo
+echo "=== other: compensate, renaming the column back ==="
+# Compensating on 'other' rather than on 'current' is deliberate, and for two reasons at once. It
+# puts 'other' back where the shared history left the column, so only 'current' has moved it and the
+# conflict is settled - and it gives current's statement, which names 'name', a column of that name
+# to land on when the merge replays it. A merge replays the other branch's raw DDL text.
+./dbgit add <<'EOF'
+ALTER TABLE employees RENAME COLUMN full_name TO name;
+EOF
+./dbgit commit
+
+echo
+echo "=== diff other current (no longer conflicting) ==="
+./dbgit diff other current
+
+echo
+echo "=== merge current into other ==="
+./dbgit merge current
+./dbgit log
