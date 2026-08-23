@@ -149,7 +149,12 @@ echo "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);" | ./dbgit add
 
 ### Runnable walkthroughs
 
-`scripts/` has end-to-end demo scripts you can run against a live daemon (from the repo root, e.g.
-`./scripts/scratch_scripts.sh`) that exercise these workflows directly: basic branching, conflicting
-and non-conflicting merges, constraints/indexes, `log`/`reset`, and (`concurrency-*-test.sh`) the
-daemon's concurrency guarantees.
+`scripts/smoke-tests/` has end-to-end scripts you can run against a live daemon (from the repo root,
+e.g. `./scripts/smoke-tests/scratch_scripts.sh`) that exercise these workflows directly: basic
+branching, conflicting and non-conflicting merges, constraints/indexes, `log`/`reset`, and
+(`concurrency-*-test.sh`) the daemon's concurrency guarantees.
+
+`scripts/live-demo-eof.sh` sits outside that directory: it is the walkthrough to *watch* rather than
+a check to run - one story told end to end, from two branches diverging to a conflict and the two
+ways of resolving it. (`scripts/live-demo.sh` is the same story as raw notes, not runnable as a
+script.)

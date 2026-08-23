@@ -1,4 +1,6 @@
+
 #reset head and clear all DB's
+rm -rf .dbgit/
 ./dbgit init --host localhost --port 5433 --database postgres --user postgres --password postgres --author "varun"
 ./dbgit log
 ./dbgit branch
@@ -14,11 +16,6 @@ CREATE TABLE employees (
 );
 ./dbgit commit
 #Show postgres state
-#make changes on current
-./dbgit add
-ALTER TABLE employees ADD COLUMN current_column DATE;
-./dbgit commit
-./dbgit log
 
 #make changes on other
 ./dbgit checkout -b other
@@ -26,6 +23,15 @@ ALTER TABLE employees ADD COLUMN current_column DATE;
 ALTER TABLE employees ADD COLUMN other_column DATE;
 ./dbgit commit
 ./dbgit log
+
+#make changes on current
+./dbgit checkout current
+./dbgit add
+ALTER TABLE employees ADD COLUMN current_column DATE;
+./dbgit commit
+./dbgit log
+
+
 
 #Show postgres state
 #merge onto current

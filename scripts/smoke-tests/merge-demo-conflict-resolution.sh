@@ -16,7 +16,7 @@
 #   - dbgit merge big (while on num) -> succeeds this time, since the conflict check no
 #     longer finds a difference to flag.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # Reset local repo state so the branches this script creates start fresh.
 rm -rf .dbgit/

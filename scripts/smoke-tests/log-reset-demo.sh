@@ -5,7 +5,7 @@
 # branch back to its first commit - which drops the working set and rebuilds the branch database by
 # replaying only the history up to that commit.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 BRANCH="log-reset-demo/$$"
 
