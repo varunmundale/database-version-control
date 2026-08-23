@@ -1,12 +1,9 @@
 package org.example.unit.adapters.spi;
 
-import org.example.adapters.h2.H2DdlParser;
-import org.example.adapters.mysql.MySqlDdlParser;
-import org.example.adapters.postgres.PostgresDdlParser;
 import org.example.adapters.spi.DdlParserRegistry;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,10 +12,15 @@ class DdlParserRegistryTest {
     private final DdlParserRegistry registry = DdlParserRegistry.builtins();
 
     @Test
-    void resolvesEachBuiltinDialectToItsOwnParser() {
-        assertInstanceOf(PostgresDdlParser.class, registry.get("postgresql"));
-        assertInstanceOf(MySqlDdlParser.class, registry.get("mysql"));
-        assertInstanceOf(H2DdlParser.class, registry.get("h2"));
+    void resolvesEachBuiltinDialectToAParserConfiguredForItsOwnGrammar() {
+        assertDoesNotThrow(() -> registry.get("postgresql").parse("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT"));
+        assertDoesNotThrow(() -> registry.get("h2").parse("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT"));
+        assertDoesNotThrow(() -> registry.get("mysql").parse("ALTER TABLE orders MODIFY COLUMN total BIGINT"));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> registry.get("mysql").parse("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT"));
+        assertThrows(IllegalArgumentException.class,
+                () -> registry.get("postgresql").parse("ALTER TABLE orders MODIFY COLUMN total BIGINT"));
     }
 
     @Test

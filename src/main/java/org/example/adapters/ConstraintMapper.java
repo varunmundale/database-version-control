@@ -9,12 +9,12 @@ import org.example.models.schema.ConstraintType;
 import java.util.List;
 
 /**
- * Recognizes constraints wherever DDL declares one - as their own {@code ALTER TABLE ADD CONSTRAINT} statement, or
- * (rejected) inline in a {@code CREATE TABLE}'s column or table-level clauses. A constraint dbgit cannot see is a
- * constraint it cannot diff, merge or replay onto a forked branch, which is why the inline forms are rejected
- * rather than silently ignored.
+ * Maps a constraint wherever JSqlParser found one declared - as its own {@code ALTER TABLE ADD CONSTRAINT}
+ * statement, or (rejected) inline in a {@code CREATE TABLE}'s column or table-level clauses - to a
+ * {@link SchemaOperation.AddConstraint}. A constraint dbgit cannot see is a constraint it cannot diff, merge or
+ * replay onto a forked branch, which is why the inline forms are rejected rather than silently ignored.
  */
-final class ConstraintParser {
+final class ConstraintMapper {
     private static final String PRIMARY_KEY = "PRIMARY KEY";
     private static final String UNIQUE = "UNIQUE";
     private static final String FOREIGN_KEY = "FOREIGN KEY";

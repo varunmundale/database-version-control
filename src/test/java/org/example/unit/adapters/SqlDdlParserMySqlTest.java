@@ -1,21 +1,24 @@
-package org.example.unit.adapters.mysql;
+package org.example.unit.adapters;
 
+import org.example.adapters.DialectGrammar;
+import org.example.adapters.SqlDdlParser;
 import org.example.core.replayer.SchemaOperation;
-import org.example.adapters.mysql.MySqlDdlParser;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * MySqlDdlParser's one difference from PostgresDdlParser/H2DdlParser - see {@code org.example.adapters.SqlDdlParser}
- * for the shared CREATE TABLE/ADD|DROP|RENAME COLUMN/constraint/index logic every dialect's parser inherits
- * unchanged, already covered end-to-end via {@code PostgresDdlParserTest}. These two sanity checks confirm that
- * shared logic really is reachable through this subclass too, not just the retype spelling.
+ * {@link SqlDdlParser} configured with {@link DialectGrammar#mysql()} - MySQL's one difference from Postgres/H2's
+ * grammar. See {@code org.example.adapters.SqlDdlParser} for the shared CREATE TABLE/ADD|DROP|RENAME
+ * COLUMN/constraint/index logic every dialect runs unchanged, already covered end-to-end via
+ * {@link SqlDdlParserPostgresTest}. These sanity checks confirm that shared logic really is reachable with this
+ * grammar too, not just the retype/identity spellings.
  */
-class MySqlDdlParserTest {
-    private final MySqlDdlParser parser = new MySqlDdlParser();
+class SqlDdlParserMySqlTest {
+    private final SqlDdlParser parser = new SqlDdlParser(DialectGrammar.mysql());
 
     @Test
     void parsesCreateTableTheSameWayEveryDialectDoes() {
@@ -52,5 +55,23 @@ class MySqlDdlParserTest {
                 () -> parser.parse("ALTER TABLE orders ALTER COLUMN total TYPE BIGINT"));
 
         assertTrue(exception.getMessage().contains("MODIFY COLUMN"), exception.getMessage());
+    }
+
+    @Test
+    void parsesAutoIncrement() {
+        SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
+                "CREATE TABLE orders (id INT NOT NULL AUTO_INCREMENT, total NUMERIC(10,2))");
+
+        assertEquals("AUTO_INCREMENT", operation.columns().get(0).generatedAs());
+        assertNull(operation.columns().get(1).generatedAs());
+    }
+
+    /** Postgres's identity spelling - not MySQL's. */
+    @Test
+    void rejectsPostgressGeneratedAsIdentitySpelling() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("CREATE TABLE orders (id INT GENERATED ALWAYS AS IDENTITY)"));
+
+        assertTrue(exception.getMessage().contains("declares GENERATED"), exception.getMessage());
     }
 }

@@ -36,6 +36,23 @@ class ColumnModelTest {
     }
 
     @Test
+    void aDifferentGeneratedAsSpecMakesTheDefinitionDifferent() {
+        ColumnModel plain = column("a", "INT", false, null);
+        ColumnModel autoIncrement = columnWithGeneratedAs("a", "INT", false, null, "AUTO_INCREMENT");
+        ColumnModel identity = columnWithGeneratedAs("a", "INT", false, null, "GENERATED ALWAYS AS IDENTITY");
+
+        assertFalse(plain.sameDefinitionAs(autoIncrement));
+        assertFalse(autoIncrement.sameDefinitionAs(identity));
+        assertTrue(autoIncrement.sameDefinitionAs(columnWithGeneratedAs("b", "INT", false, null, "AUTO_INCREMENT")));
+    }
+
+    @Test
+    void definitionRendersTheGeneratedAsSpecLast() {
+        assertEquals("INT NOT NULL AUTO_INCREMENT",
+                columnWithGeneratedAs("a", "INT", false, null, "AUTO_INCREMENT").definition());
+    }
+
+    @Test
     void differsFromIsFalseOnlyWhenNameAndDefinitionBothMatch() {
         ColumnModel base = column("a", "NUMERIC(10,2)", true, "0");
 
@@ -45,6 +62,10 @@ class ColumnModelTest {
     }
 
     private static ColumnModel column(String name, String type, boolean nullable, String defaultValue) {
-        return new ColumnModel(StableId.of("column", "public.orders." + name), name, type, nullable, defaultValue);
+        return columnWithGeneratedAs(name, type, nullable, defaultValue, null);
+    }
+
+    private static ColumnModel columnWithGeneratedAs(String name, String type, boolean nullable, String defaultValue, String generatedAs) {
+        return new ColumnModel(StableId.of("column", "public.orders." + name), name, type, nullable, defaultValue, generatedAs);
     }
 }

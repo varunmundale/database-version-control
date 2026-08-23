@@ -5,7 +5,6 @@ import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.alter.AlterExpression;
-import net.sf.jsqlparser.statement.alter.AlterOperation;
 import net.sf.jsqlparser.statement.create.index.CreateIndex;
 import net.sf.jsqlparser.statement.create.table.ColumnDefinition;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
@@ -15,38 +14,46 @@ import org.example.core.replayer.SchemaOperation;
 import org.example.models.schema.ColumnModel;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
- * Dispatches DDL parsing for every SQL dialect dbgit understands, using
+ * Parses DDL for every SQL dialect dbgit understands, using
  * <a href="https://github.com/JSQLParser/JSqlParser">JSqlParser</a> for the actual grammar rather than hand-rolled
  * pattern matching - it already handles quoting, schema-qualified names, and each vendor's own type syntax
  * correctly. {@code CREATE TABLE} (columns only), {@code ALTER TABLE ADD|DROP|RENAME COLUMN},
  * {@code ALTER TABLE ADD|DROP CONSTRAINT} and {@code CREATE [UNIQUE] INDEX} are identical across Postgres, MySQL
  * and H2's grammars, so none of that belongs to any one vendor - this class routes each statement to whichever of
- * {@link ColumnParser} (column definitions), {@link ConstraintParser} (constraints, wherever declared) or
+ * {@link ColumnMapper} (column definitions), {@link ConstraintMapper} (constraints, wherever declared) or
  * {@link SqlIdentifiers} (case-folding, type-name cleanup) actually owns it, rather than doing all of it itself.
  *
- * <p>The one thing that genuinely differs per dialect is how a column's type change is spelled: Postgres and H2
- * both use {@code ALTER COLUMN c TYPE t}, MySQL uses {@code MODIFY COLUMN c t}. JSqlParser tells the two apart as
- * distinct {@link AlterOperation}s but populates the column/type identically for either, so
- * {@link #isRetypeOperation} is the one hook a subclass implements to say which operation(s) its dialect spells a
- * retype with; {@link #retypeSyntax()} names that spelling for the "unsupported statement" error message. Every
- * subclass - {@code PostgresDdlParser}, {@code MySqlDdlParser}, {@code H2DdlParser} - is otherwise this same class.
+ * <p>The two things that genuinely differ per dialect - how a column's type change is spelled ({@code ALTER
+ * COLUMN c TYPE t} for Postgres/H2, {@code MODIFY COLUMN c t} for MySQL) and what an identity/auto-increment
+ * column spec looks like ({@code GENERATED ... AS IDENTITY} versus {@code AUTO_INCREMENT}) - are pure vocabulary,
+ * never behavior: every dialect runs exactly the same parsing logic, just checked against different constants. So
+ * rather than one subclass per dialect overriding a hook, a single {@code SqlDdlParser} is configured with a
+ * {@link DialectGrammar} naming that dialect's spellings; {@link org.example.adapters.spi.DdlParserRegistry}
+ * builds one instance per registered dialect.
  *
  * <p>Constraints and indexes must be declared as their own statements: a {@code CREATE TABLE} that carries a
  * constraint - whether written on a column ({@code id INT PRIMARY KEY}) or as a table-level clause
  * ({@code , PRIMARY KEY (id)}) - is rejected, rather than silently ignored as it once was. A constraint dbgit
- * cannot see is a constraint it cannot diff, merge or replay onto a forked branch. {@code NOT NULL} and
- * {@code DEFAULT} are exempt: they are properties of the column itself, and the model already carries them.
+ * cannot see is a constraint it cannot diff, merge or replay onto a forked branch. {@code NOT NULL},
+ * {@code DEFAULT} and the dialect's identity/auto-increment spec are exempt: they are properties of the column
+ * itself, and the model already carries them - see {@link ColumnSpecs}.
  */
-public abstract class SqlDdlParser implements DdlParser {
+public final class SqlDdlParser implements DdlParser {
     private static final String UNIQUE = "UNIQUE";
 
-    private final ColumnParser columnParser = new ColumnParser();
-    private final ConstraintParser constraintParser = new ConstraintParser();
+    private final ColumnMapper columnMapper = new ColumnMapper();
+    private final ConstraintMapper constraintMapper = new ConstraintMapper();
+    private final DialectGrammar grammar;
+
+    public SqlDdlParser(DialectGrammar grammar) {
+        this.grammar = Objects.requireNonNull(grammar, "grammar must not be null");
+    }
 
     @Override
-    public final SchemaOperation parse(String ddl) {
+    public SchemaOperation parse(String ddl) {
         Statement statement = parseStatement(ddl);
         if (statement instanceof CreateTable createTable) {
             return toCreateTable(createTable, ddl);
@@ -66,12 +73,6 @@ public abstract class SqlDdlParser implements DdlParser {
         throw unsupported(ddl);
     }
 
-    /** Whether {@code operation} is this dialect's spelling of a column retype - e.g. {@code ALTER} for Postgres/H2, {@code MODIFY} for MySQL. */
-    protected abstract boolean isRetypeOperation(AlterOperation operation);
-
-    /** How this dialect spells a column retype, named for the "unsupported statement" error message. */
-    protected abstract String retypeSyntax();
-
     private static Statement parseStatement(String ddl) {
         try {
             return CCJSqlParserUtil.parse(ddl);
@@ -82,9 +83,9 @@ public abstract class SqlDdlParser implements DdlParser {
 
     private SchemaOperation toCreateTable(CreateTable createTable, String ddl) {
         String tableName = SqlIdentifiers.normalize(createTable.getTable().getName());
-        constraintParser.rejectTableLevelConstraints(createTable, tableName);
+        constraintMapper.rejectTableLevelConstraints(createTable, tableName);
         List<ColumnModel> columns = createTable.getColumnDefinitions().stream()
-                .map(column -> columnParser.toColumnModel(column, tableName))
+                .map(column -> columnMapper.toColumnModel(column, tableName, grammar.identitySpecs()))
                 .toList();
         return new SchemaOperation.CreateTable(tableName, createTable.isIfNotExists(), columns);
     }
@@ -97,13 +98,13 @@ public abstract class SqlDdlParser implements DdlParser {
         AlterExpression expression = expressions.get(0);
         String tableName = SqlIdentifiers.normalize(alter.getTable().getName());
 
-        if (isRetypeOperation(expression.getOperation())) {
+        if (grammar.isRetypeOperation(expression.getOperation())) {
             return toAlterColumnType(tableName, soleColumn(expression, ddl), ddl);
         }
         return switch (expression.getOperation()) {
             case ADD -> expression.getIndex() == null
-                    ? new SchemaOperation.AddColumn(tableName, columnParser.toColumnModel(soleColumn(expression, ddl), tableName))
-                    : constraintParser.toAddConstraint(tableName, expression.getIndex(), ddl);
+                    ? new SchemaOperation.AddColumn(tableName, columnMapper.toColumnModel(soleColumn(expression, ddl), tableName, grammar.identitySpecs()))
+                    : constraintMapper.toAddConstraint(tableName, expression.getIndex(), ddl);
             case DROP -> expression.getConstraintName() == null
                     ? new SchemaOperation.DropColumn(tableName, SqlIdentifiers.normalize(expression.getColumnName()))
                     : new SchemaOperation.DropConstraint(tableName, SqlIdentifiers.normalize(expression.getConstraintName()));
@@ -126,10 +127,10 @@ public abstract class SqlDdlParser implements DdlParser {
     }
 
     /**
-     * Reached whenever {@link #isRetypeOperation} says so. The {@code USING <expr>} conversion clause Postgres
-     * allows is accepted but discarded - the internal model only needs the resulting type. {@code SET}/
-     * {@code DROP NOT NULL} and similar leave the type token empty or non-{@code USING} specs, which this rejects
-     * rather than silently misreading.
+     * Reached whenever {@link DialectGrammar#isRetypeOperation} says so. The {@code USING <expr>} conversion
+     * clause Postgres allows is accepted but discarded - the internal model only needs the resulting type.
+     * {@code SET}/{@code DROP NOT NULL} and similar leave the type token empty or non-{@code USING} specs, which
+     * this rejects rather than silently misreading.
      */
     private SchemaOperation toAlterColumnType(String tableName, ColumnDefinition column, String ddl) {
         List<String> specs = column.getColumnSpecs();
@@ -153,7 +154,7 @@ public abstract class SqlDdlParser implements DdlParser {
     private IllegalArgumentException unsupported(String statement) {
         return new IllegalArgumentException("Unsupported DDL statement: " + statement
                 + ". Supported: CREATE TABLE (columns only); ALTER TABLE ADD|DROP|RENAME COLUMN;"
-                + " " + retypeSyntax() + "; ALTER TABLE ADD CONSTRAINT ...; ALTER TABLE DROP CONSTRAINT;"
+                + " " + grammar.retypeSyntax() + "; ALTER TABLE ADD CONSTRAINT ...; ALTER TABLE DROP CONSTRAINT;"
                 + " CREATE [UNIQUE] INDEX.");
     }
 }

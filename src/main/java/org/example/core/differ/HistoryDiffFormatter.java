@@ -14,12 +14,16 @@ import java.util.TreeSet;
 
 /**
  * Renders the divergence between two branches' commit histories as a tree: finds the lowest common ancestor
- * commit (the longest shared prefix of both histories), then - for every table touched beyond it - a node per
- * column, constraint and index that actually differs, each listing every statement run against it on that side,
- * marked {@code >} for the left branch or {@code <} for the right. A column {@link DatabaseDiff} finds genuinely conflicting (matched
- * by stable id, so a rename on one side racing a modification on the other still counts) is labeled as such, with
- * both sides' statements nested underneath it - "bringing them together" without needing a separate rendering
- * for conflicting vs. non-conflicting columns.
+ * commit (the longest shared prefix of both histories), then - for every table {@link DatabaseDiff} finds a real
+ * difference in, comparing the two sides' current schemas rather than which tables some changeset merely
+ * mentioned - a node per column, constraint and index that actually differs, each listing every statement run
+ * against it on that side, marked {@code >} for the left branch or {@code <} for the right. A table that was
+ * touched post-divergence but nets out identical (e.g. a column added and dropped again on one side, never
+ * present on the other) gets no node at all - same as a column, constraint or index matched by stable id with
+ * nothing worth reporting. A column {@link DatabaseDiff} finds genuinely conflicting (matched by stable id, so a
+ * rename on one side racing a modification on the other still counts) is labeled as such, with both sides'
+ * statements nested underneath it - "bringing them together" without needing a separate rendering for
+ * conflicting vs. non-conflicting columns.
  *
  * <pre>
  * left vs right
@@ -57,13 +61,9 @@ public final class HistoryDiffFormatter {
         Map<StableId, List<ChangeSet>> rightByObject = changesetsByObject(rightHistory, commonAncestorLength);
         Map<String, TableDiff> tableDiffsByName = tableDiffsByName(leftHistory, rightHistory);
 
-        TreeSet<String> touchedTables = new TreeSet<>();
-        leftOnly.forEach(changeset -> touchedTables.add(tableName(changeset)));
-        rightOnly.forEach(changeset -> touchedTables.add(tableName(changeset)));
-
         List<String> lines = new ArrayList<>();
         lines.add(left + " vs " + right);
-        for (String table : touchedTables) {
+        for (String table : new TreeSet<>(tableDiffsByName.keySet())) {
             appendTable(lines, table, tableDiffsByName.get(table), leftByObject, rightByObject);
         }
         return lines;
@@ -77,12 +77,10 @@ public final class HistoryDiffFormatter {
         return byName;
     }
 
+    /** {@code tableDiff} is never empty here - {@link #format} only calls this for a table {@link DatabaseDiff} actually found a difference in. */
     private void appendTable(List<String> lines, String table, TableDiff tableDiff,
                               Map<StableId, List<ChangeSet>> leftByObject, Map<StableId, List<ChangeSet>> rightByObject) {
         lines.add("- " + table);
-        if (tableDiff == null) {
-            return;
-        }
         for (ColumnDiff columnDiff : tableDiff.columnDiffs()) {
             appendNode(lines, columnDiff.columnName(), columnDiff.side(), columnDiff.id(), leftByObject, rightByObject);
         }

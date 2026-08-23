@@ -112,6 +112,23 @@ class HistoryDiffFormatterTest {
         ), lines);
     }
 
+    /**
+     * A column added and dropped again on one side nets out to no schema difference at all, even though a
+     * changeset did touch the table post-divergence - so no {@code "- orders"} node should appear, not even an
+     * empty one.
+     */
+    @Test
+    void aTableTouchedPostDivergenceButNettingToNoDifferenceGetsNoNodeAtAll() {
+        ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
+        ChangeSet addColumn = changeset("ALTER TABLE orders ADD COLUMN total INT;");
+        ChangeSet dropColumn = changeset("ALTER TABLE orders DROP COLUMN total;");
+
+        List<String> lines = formatter.format("left", "right",
+                List.of(create, addColumn, dropColumn), List.of(create));
+
+        assertEquals(List.of("left vs right"), lines);
+    }
+
     @Test
     void changesBeforeTheCommonAncestorAreExcludedFromTheOutput() {
         ChangeSet create = changeset("CREATE TABLE orders (id INT NOT NULL);");
