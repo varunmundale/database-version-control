@@ -4,7 +4,6 @@ import org.example.models.versioning.ChangeSet;
 import org.example.models.versioning.Commit;
 import org.example.models.versioning.CommitEntry;
 import org.example.models.versioning.CommitMetadata;
-import org.example.models.versioning.CommitParents;
 import org.example.config.ConnectionSettings;
 import org.example.config.TrackedDatabaseConfig;
 import org.example.repository.BranchMetadataRepository;
@@ -14,11 +13,9 @@ import org.example.repository.MetadataDatabase;
 import org.example.repository.TrackedDatabaseRepository;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * The default {@link VersioningService}, backed by the metadata repositories in
@@ -97,7 +94,7 @@ public final class MetadataVersioningService implements VersioningService {
             }
 
             Map<Long, Commit> commitsById = commitRepository.findAll();
-            List<Long> order = ancestryOrder(headCommitId, commitsById);
+            List<Long> order = new CommitGraph(commitsById).topologicalOrder(headCommitId);
             Map<Long, List<ChangeSet>> byCommit = changesetRepository.findGroupedByCommitId(order);
 
             List<CommitEntry> entries = new ArrayList<>();
@@ -147,7 +144,7 @@ public final class MetadataVersioningService implements VersioningService {
             if (headCommitId == null) {
                 throw new VersioningException("Branch '" + branch + "' has no commits to reset to.");
             }
-            if (!ancestryOrder(headCommitId, commitRepository.findAll()).contains(commitId)) {
+            if (!new CommitGraph(commitRepository.findAll()).isAncestor(commitId, headCommitId)) {
                 throw new VersioningException(
                         "Commit #" + commitId + " is not in branch '" + branch + "' history.");
             }
@@ -165,31 +162,6 @@ public final class MetadataVersioningService implements VersioningService {
         if (branchRepository.updateHeadCommitId(branch, expectedHeadCommitId, commitId) == 0) {
             throw new VersioningException("Branch '" + branch + "' moved concurrently; nothing was changed."
                     + " Re-read its history and try again.");
-        }
-    }
-
-    private static List<Long> ancestryOrder(long headCommitId, Map<Long, Commit> commitsById) {
-        List<Long> order = new ArrayList<>();
-        collectAncestryOrder(headCommitId, commitsById, new LinkedHashSet<>(), order);
-        return order;
-    }
-
-    /**
-     * Walks a commit's ancestry in the order its schema was actually built up: the first parent's full history,
-     * then anything reachable only through the second parent (a merge commit's contribution), then the commit
-     * itself - mirroring how {@code createMergeCommit} physically replayed the second branch's diverged changesets
-     * on top of the first's. A commit already {@code seen} (a common ancestor reached through both parents) is not
-     * revisited, so it stays at its original position instead of being duplicated.
-     */
-    private static void collectAncestryOrder(Long commitId, Map<Long, Commit> commitsById, Set<Long> seen, List<Long> order) {
-        if (commitId == null || seen.contains(commitId)) {
-            return;
-        }
-        CommitParents parents = commitsById.get(commitId).parents();
-        collectAncestryOrder(parents.parentCommitId(), commitsById, seen, order);
-        collectAncestryOrder(parents.secondParentCommitId(), commitsById, seen, order);
-        if (seen.add(commitId)) {
-            order.add(commitId);
         }
     }
 }
