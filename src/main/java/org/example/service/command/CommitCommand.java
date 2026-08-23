@@ -18,6 +18,11 @@ import java.util.Objects;
  * the time the daemon sees it.
  */
 public final class CommitCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("commit",
+            "dbgit commit [-m <message>] [--author <name>]",
+            "Folds the current branch's applied changesets into one new commit, chained onto the branch's HEAD. "
+                    + "--author overrides the default author (whoever the daemon runs as).");
+
     private final Committer committer;
     private final List<String> arguments;
 

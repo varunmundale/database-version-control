@@ -7,6 +7,9 @@ import java.util.List;
 
 /** {@code dbgit branch} - lists every known branch, marking the currently checked-out one. */
 public final class BranchCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("branch", "dbgit branch",
+            "Lists every known branch, marking the currently checked-out one with '*'.");
+
     public BranchCommand(CommandContext context) {
         super(context);
     }

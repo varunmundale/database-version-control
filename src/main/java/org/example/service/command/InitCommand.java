@@ -24,6 +24,11 @@ import java.util.Optional;
  * {@code main}, keeping its commit history.
  */
 public final class InitCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("init",
+            "dbgit init --host <host> [--port 5432] --database <database> --user <user> [--password <password>]",
+            "Points 'main' at a real, already-existing database it tracks. Idempotent: re-running it against the "
+                    + "same target just refreshes the stored connection.");
+
     private static final String BRANCH = RequestContext.DEFAULT_BRANCH;
 
     public InitCommand(CommandContext context) {

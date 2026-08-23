@@ -17,6 +17,10 @@ import java.util.Objects;
  * counts) is labeled as such, with both sides' statements brought together in the same place.
  */
 public final class DiffCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("diff", "dbgit diff <branch1> <branch2>",
+            "Compares two branches' schemas by walking their commit histories, printing one node per table and "
+                    + "per column that actually differs.");
+
     private final DatabaseDiff databaseDiff = new DatabaseDiff();
     private final String left;
     private final String right;

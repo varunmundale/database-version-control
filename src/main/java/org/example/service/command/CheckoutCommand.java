@@ -10,6 +10,11 @@ import java.util.Objects;
  * creates the branch first, delegating to {@link CreateBranchCommand}, then switches to it.
  */
 public final class CheckoutCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("checkout",
+            "dbgit checkout <branch> | dbgit checkout -b <branch>",
+            "Switches to an already-existing branch, or with -b forks the current branch's database into a new "
+                    + "one and switches to that.");
+
     private final List<String> arguments;
 
     /** {@code arguments} is everything after {@code dbgit checkout}: either {@code [branch]} or {@code [-b, branch]}. */

@@ -113,6 +113,38 @@ class DbGitCommandsTest {
     }
 
     @Test
+    void helpListsEveryCommandsUsage() {
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+
+        DbGitCommandResult result = dbgit.execute("dbgit help");
+
+        List<String> lines = result.lines();
+        assertEquals("dbgit commands:", lines.getFirst());
+        assertEquals("Run 'dbgit help <command>' for detail on one command.", lines.getLast());
+        assertTrue(lines.stream().anyMatch(line -> line.contains("dbgit commit")));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("dbgit merge <branch>")));
+    }
+
+    @Test
+    void helpWithACommandNamePrintsJustThatCommandsUsage() {
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+
+        DbGitCommandResult result = dbgit.execute("dbgit help commit");
+
+        assertEquals(List.of("dbgit commit [-m <message>] [--author <name>]",
+                "Folds the current branch's applied changesets into one new commit, chained onto the branch's "
+                        + "HEAD. --author overrides the default author (whoever the daemon runs as)."),
+                result.lines());
+    }
+
+    @Test
+    void helpRejectsAnUnknownCommandName() {
+        DaemonSession dbgit = listener(new Forker(new RecordingRunner(), new NoOpConnectorFactory(), new InMemoryMetadataStore()));
+
+        assertThrows(IllegalArgumentException.class, () -> dbgit.execute("dbgit help nonsense"));
+    }
+
+    @Test
     void addsACreateTableStatementBuildsTheInternalRepresentationAndAppliesTheChangeset() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
         RecordingConnectorFactory connectorFactory = new RecordingConnectorFactory();

@@ -12,6 +12,11 @@ import java.util.Objects;
  * {@link Stager}. This is the only command that touches a live database.
  */
 public final class AddCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("add", "dbgit add <DDL statement (via stdin)>",
+            "Stages one DDL statement, applies it to the current branch's live database and marks it applied. "
+                    + "The statement is read from stdin rather than the command line, since it can span multiple "
+                    + "lines, e.g.: echo \"ALTER TABLE t ADD COLUMN c INT;\" | dbgit add");
+
     private final Stager stager;
     private final String ddl;
 

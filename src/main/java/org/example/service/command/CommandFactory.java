@@ -59,15 +59,12 @@ public final class CommandFactory {
                 }
                 yield new MergeCommand(context, arguments.get(2));
             }
+            case "help" -> new HelpCommand(context, arguments.subList(2, arguments.size()));
             default -> throw usage();
         };
     }
 
     private static IllegalArgumentException usage() {
-        return new IllegalArgumentException(
-                "Usage: dbgit init --host <h> [--port 5432] --database <d> --user <u> [--password <w>] "
-                        + "| dbgit checkout -b <branch> | dbgit checkout <branch> | dbgit branch | dbgit add "
-                        + "| dbgit commit [-m <message>] [--author <name>] | dbgit log | dbgit reset <commit> "
-                        + "| dbgit diff <branch1> <branch2> | dbgit merge <branch>");
+        return new IllegalArgumentException("Unknown or malformed command. Run 'dbgit help' to list all commands.");
     }
 }

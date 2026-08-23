@@ -9,6 +9,10 @@ import org.example.service.DbGitCommandResult;
  * changesets it folded in, preceded by whatever is staged but not committed yet.
  */
 public final class LogCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("log", "dbgit log",
+            "Prints the current branch's commits, newest first, preceded by whatever is staged but not "
+                    + "committed yet.");
+
     private final HistoryLog historyLog;
     private final HistoryLogFormatter formatter = new HistoryLogFormatter();
 

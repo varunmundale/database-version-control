@@ -13,6 +13,10 @@ import java.util.Objects;
  * is accepted both as {@code 3} and as the {@code #3} the other commands print.
  */
 public final class ResetCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("reset", "dbgit reset <commit>",
+            "Takes the current branch back to a commit (accepted as '3' or '#3'), dropping its working set and "
+                    + "rebuilding its database from the truncated history. Refused for 'main'.");
+
     private final Resetter resetter;
     private final String commit;
 

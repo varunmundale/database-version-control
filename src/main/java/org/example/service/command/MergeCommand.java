@@ -13,6 +13,10 @@ import java.util.Objects;
  * {@link Merger} and turns its {@link MergeResult} into either printed output or a rejection.
  */
 public final class MergeCommand extends Command {
+    public static final CommandUsage USAGE = new CommandUsage("merge", "dbgit merge <branch>",
+            "Merges another branch into the current one via a validation staging branch, failing on any "
+                    + "conflicting table/column/constraint/index change.");
+
     private final Merger merger;
     private final String otherBranch;
 
