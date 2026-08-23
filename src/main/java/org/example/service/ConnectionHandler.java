@@ -6,6 +6,8 @@ import org.example.protocol.RequestHeader;
 import org.example.service.command.AddCommand;
 import org.example.service.command.CommandContext;
 import org.example.service.command.CommandFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.Socket;
@@ -16,8 +18,13 @@ import java.util.Arrays;
  * line, then - for {@code dbgit add} alone - a body. Owns one socket for its whole life, closing it however the
  * command turns out. The accept loop and thread pool that hand it a socket belong to {@link DbGitCommandListener};
  * this class knows nothing about either.
+ *
+ * <p>What gets logged deliberately stops at the command line: the header carries {@code db-password}, and
+ * {@code dbgit add}'s DDL body arrives separately and is already recorded as a changeset, so neither needs a
+ * second copy in the log.
  */
 final class ConnectionHandler implements Runnable {
+    private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
     private static final String ADD_COMMAND = "dbgit add";
 
     private final Socket socket;
@@ -38,12 +45,14 @@ final class ConnectionHandler implements Runnable {
         try (Socket owned = socket) {
             handle(owned);
         } catch (IOException exception) {
-            System.err.println("[dbService] Dropped a connection: " + exception.getMessage());
+            LOG.warn("Dropped a connection: {}", exception.getMessage());
         }
     }
 
     /** Called instead of {@link #run()} when the pool's queue is full - the socket still needs an answer. */
     void reject() {
+        LOG.warn("Server busy: all {} handlers are in use and the queue is full; rejecting a connection.",
+                concurrency.handlerThreads());
         try (Socket owned = socket;
              SocketWriter writer = new SocketWriter(owned)) {
             writer.writeError("Server busy: all " + concurrency.handlerThreads()
@@ -73,6 +82,7 @@ final class ConnectionHandler implements Runnable {
             try {
                 request = RequestHeader.parse(headerLine);
             } catch (IllegalArgumentException exception) {
+                LOG.warn("Rejected a request with an unsupported header: {}", exception.getMessage());
                 writer.writeError(exception.getMessage());
                 return;
             }
@@ -82,9 +92,12 @@ final class ConnectionHandler implements Runnable {
                 writer.writeError("No command received.");
                 return;
             }
+            LOG.info("author={} branch={} command=\"{}\"", request.author(), request.branch(), commandLine.trim());
             try {
                 writer.writeOk(dispatch(request, commandLine, reader).lines());
             } catch (RuntimeException exception) {
+                LOG.warn("author={} branch={} command=\"{}\" failed: {}",
+                        request.author(), request.branch(), commandLine.trim(), exception.getMessage());
                 writer.writeError(exception.getMessage());
             }
         }

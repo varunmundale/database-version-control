@@ -45,3 +45,6 @@ build/
 
 .dbgit/
 CLAUDE.md
+
+### dbService logs ###
+logs/

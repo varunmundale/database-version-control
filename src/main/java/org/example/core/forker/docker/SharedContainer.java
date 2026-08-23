@@ -3,6 +3,8 @@ package org.example.core.forker.docker;
 import org.example.core.forker.ForkException;
 import org.example.config.BranchDatabaseConfig;
 import org.example.repository.BranchDatabaseRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ import java.util.Objects;
  * reuse-if-already-running check - is genuinely the same regardless of which server it is.
  */
 public final class SharedContainer {
+    private static final Logger LOG = LoggerFactory.getLogger(SharedContainer.class);
     private static final Map<String, ContainerSpec> SPECS = ContainerSpec.builtins();
     private static final int READY_ATTEMPTS = 20;
 
@@ -119,12 +122,10 @@ public final class SharedContainer {
     }
 
     private static void out(String message) {
-        System.out.println("[SharedContainer] " + message);
-        System.out.flush();
+        LOG.info(message);
     }
 
     private static void err(String message) {
-        System.err.println("[SharedContainer] " + message);
-        System.err.flush();
+        LOG.error(message);
     }
 }

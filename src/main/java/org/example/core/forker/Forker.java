@@ -9,6 +9,8 @@ import org.example.models.versioning.ChangeSet;
 import org.example.repository.BranchDatabaseRepository;
 import org.example.core.versioning.MetadataVersioningService;
 import org.example.core.versioning.VersioningService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Objects;
@@ -16,6 +18,7 @@ import java.util.regex.Pattern;
 
 /** Forks a branch's database into one persistent PostgreSQL Docker container, recreating it from the parent's commit history. */
 public final class Forker {
+    private static final Logger LOG = LoggerFactory.getLogger(Forker.class);
     private static final Pattern BRANCH_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
 
     private final BranchDatabaseConfig config = BranchDatabaseConfig.getInstance();
@@ -113,12 +116,10 @@ public final class Forker {
     }
 
     private static void out(String message) {
-        System.out.println("[Forker] " + message);
-        System.out.flush();
+        LOG.info(message);
     }
 
     private static void err(String message) {
-        System.err.println("[Forker] " + message);
-        System.err.flush();
+        LOG.error(message);
     }
 }
