@@ -377,4 +377,96 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
         assertTrue(rejected.failed());
         assertTrue(rejected.mentions("Cannot merge branch 'solo' into itself."), rejected.text());
     }
+
+    /**
+     * A one-sided table rename is just a change the target hasn't received yet, exactly like a one-sided column
+     * change - it merges in cleanly, and afterwards the two branches' schemas agree entirely (their histories now
+     * do too, since the merge commit brought every one of the other branch's commits into the target's ancestry).
+     */
+    @Test
+    void mergingABranchThatRenamedATableBringsTheRenameIn() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("CREATE TABLE orders (id SERIAL, total NUMERIC(10,2));");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "renamed");
+        add("ALTER TABLE orders RENAME TO purchases;");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        CommandOutput merged = dbgit("merge", "renamed");
+
+        assertEquals("Merged 'renamed' into 'base' as commit #3, applying 1 changeset(s).", merged.out().getFirst());
+        assertEquals(List.of("purchases"), schema.tables(databaseOf("base")));
+        assertEquals(List.of("id", "total"), schema.columns(databaseOf("base"), "purchases"));
+        assertEquals(List.of("No differences between 'base' and 'renamed'."), dbgit("diff", "base", "renamed").out());
+    }
+
+    /** Both branches renamed the same table, differently - a table-level conflict, reported the same way a column one is. */
+    @Test
+    void bothBranchesRenamingTheSameTableIsRefusedAsATableLevelConflict() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("CREATE TABLE orders (id SERIAL);");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "toPurchases");
+        add("ALTER TABLE orders RENAME TO purchases;");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        dbgit("checkout", "-b", "toSales");
+        add("ALTER TABLE orders RENAME TO sales;");
+        dbgit("commit");
+
+        assertTrue(dbgit("diff", "toPurchases", "toSales").out().contains("- purchases (conflicting)"));
+
+        dbgit("checkout", "toPurchases");
+        CommandOutput rejected = cli.run("merge", "toSales");
+
+        assertTrue(rejected.failed(), rejected.text());
+        assertTrue(rejected.mentions("conflicting changes to table 'purchases'"), rejected.text());
+        assertEquals(List.of("purchases"), schema.tables(databaseOf("toPurchases")),
+                "the rejected merge must not have touched the target's database");
+        assertEquals(List.of("  base", "  main", "* toPurchases", "  toSales"), dbgit("branch").out());
+    }
+
+    /**
+     * A merge replays the other branch's raw DDL text. Its statement names 'orders', but the target renamed that
+     * table to 'purchases' - so the replay fails against the staging branch's real database before the target's
+     * own database is ever touched. Not a conflict dbgit's model can see: id-wise nothing here disagrees, since the
+     * other branch never touched the table's identity, only added a column to what it still calls 'orders'.
+     */
+    @Test
+    void mergingAStatementNamingATableTheOtherBranchRenamedFailsInStagingAndLeavesTheTargetIntact() {
+        initialiseMain();
+        dbgit("checkout", "-b", "base");
+        add("CREATE TABLE orders (id SERIAL);");
+        dbgit("commit");
+
+        dbgit("checkout", "-b", "renamer");
+        add("ALTER TABLE orders RENAME TO purchases;");
+        dbgit("commit");
+
+        dbgit("checkout", "base");
+        dbgit("checkout", "-b", "adder");
+        add("ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);");
+        dbgit("commit");
+
+        // Not flagged as a conflict: the 'total' column is a one-sided addition, and adder never touched the
+        // table's own identity, so the diff has nothing to refuse the merge over.
+        assertFalse(dbgit("diff", "renamer", "adder").out().stream().anyMatch(line -> line.contains("(conflicting)")));
+
+        dbgit("checkout", "renamer");
+        CommandOutput rejected = cli.run("merge", "adder");
+
+        assertTrue(rejected.failed(), rejected.text());
+        assertTrue(rejected.mentions("Could not replay changeset"), rejected.text());
+        assertEquals(List.of("purchases"), schema.tables(databaseOf("renamer")),
+                "the failure is in the staging replay, before the target's own database is ever touched");
+        assertEquals(List.of("id"), schema.columns(databaseOf("renamer"), "purchases"));
+        assertTrue(dbgit("branch").out().stream().noneMatch(line -> line.contains("merge/")),
+                "the staging branch is dropped in a finally, whether the merge succeeded or not");
+    }
 }

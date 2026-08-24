@@ -16,7 +16,7 @@ rm -rf .dbgit/
 echo "=== Starting on main ==="
 # main is no longer an implicit scratchpad database - it tracks a real one, named here. Re-running
 # this is harmless: the same target signs the same, so init is idempotent.
-./dbgit init --host localhost --port 5543 --database postgres --user postgres --password postgres --author "merge-demo-conflicting"
+./dbgit init --host localhost --port 5433 --database postgres --user postgres --password postgres --author "merge-demo-conflicting"
 
 ./dbgit checkout main
 

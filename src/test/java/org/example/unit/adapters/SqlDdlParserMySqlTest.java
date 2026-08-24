@@ -74,4 +74,30 @@ class SqlDdlParserMySqlTest {
 
         assertTrue(exception.getMessage().contains("declares GENERATED"), exception.getMessage());
     }
+
+    @Test
+    void parsesDropTableTheSameWayEveryDialectDoes() {
+        SchemaOperation.DropTable operation = (SchemaOperation.DropTable) parser.parse("DROP TABLE orders");
+
+        assertEquals("orders", operation.tableName());
+    }
+
+    @Test
+    void parsesRenameToTheSameWayEveryDialectDoes() {
+        SchemaOperation.RenameTable operation = (SchemaOperation.RenameTable) parser.parse(
+                "ALTER TABLE orders RENAME TO purchases");
+
+        assertEquals("orders", operation.tableName());
+        assertEquals("purchases", operation.newName());
+    }
+
+    /** MySQL's own table-rename spelling - out of scope, since ALTER TABLE ... RENAME TO covers every dialect. */
+    @Test
+    void rejectsTheRenameTableSpelling() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("RENAME TABLE orders TO purchases"));
+
+        assertTrue(exception.getMessage().contains("ALTER TABLE"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("RENAME TO"), exception.getMessage());
+    }
 }

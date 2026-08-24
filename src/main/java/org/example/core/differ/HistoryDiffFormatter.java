@@ -13,7 +13,8 @@ import java.util.List;
  * looks like on a terminal: a node per table, a node per object under it marked {@code (conflicting)} when the
  * diff says both branches changed it since they diverged, and beneath it every statement, marked {@code >} for the
  * left branch or {@code <} for the right - which is what brings both sides of a conflict together without needing
- * a second rendering for it.
+ * a second rendering for it. A table itself is a node the same way, marked {@code (conflicting)} when both sides
+ * created, dropped or renamed it since they diverged, with its own statements nested directly underneath.
  *
  * <pre>
  * left vs right
@@ -21,7 +22,14 @@ import java.util.List;
  *   |- total (conflicting)
  *     |- &gt; ALTER TABLE orders ...
  *     |- &lt; ALTER TABLE orders ...
+ * - scratch (conflicting)
+ *   |- &gt; ALTER TABLE scratch RENAME TO staging;
+ *   |- &lt; DROP TABLE scratch;
  * </pre>
+ *
+ * <p>A table present on only one side - created or dropped, not merely renamed - prints just that statement: every
+ * column, constraint and index it carried went with it, which the statement already says, so listing each of them
+ * again underneath would say nothing new.
  */
 public final class HistoryDiffFormatter {
 
@@ -41,7 +49,12 @@ public final class HistoryDiffFormatter {
     }
 
     private static void appendTable(List<String> lines, TableDiff tableDiff, HistoryDiff diff) {
-        lines.add("- " + tableDiff.tableName());
+        lines.add("- " + tableDiff.tableName() + (diff.isConflicting(tableDiff.id()) ? " (conflicting)" : ""));
+        appendStatements(lines, "  |- ", ">", diff.leftStatements(tableDiff.id()));
+        appendStatements(lines, "  |- ", "<", diff.rightStatements(tableDiff.id()));
+        if (tableDiff.side() != Side.BOTH) {
+            return; // created or dropped, not merely renamed - the statement above already accounts for everything it carried
+        }
         for (ColumnDiff columnDiff : tableDiff.columnDiffs()) {
             appendNode(lines, columnDiff.columnName(), columnDiff.id(), diff);
         }
@@ -60,12 +73,12 @@ public final class HistoryDiffFormatter {
      */
     private static void appendNode(List<String> lines, String label, StableId id, HistoryDiff diff) {
         lines.add("  |- " + label + (diff.isConflicting(id) ? " (conflicting)" : ""));
-        appendStatements(lines, "> ", diff.leftStatements(id));
-        appendStatements(lines, "< ", diff.rightStatements(id));
+        appendStatements(lines, "    |- ", ">", diff.leftStatements(id));
+        appendStatements(lines, "    |- ", "<", diff.rightStatements(id));
     }
 
-    private static void appendStatements(List<String> lines, String marker, List<ChangeSet> statements) {
-        statements.forEach(changeset -> lines.add("    |- " + marker + changeset.ddl()));
+    private static void appendStatements(List<String> lines, String prefix, String marker, List<ChangeSet> statements) {
+        statements.forEach(changeset -> lines.add(prefix + marker + " " + changeset.ddl()));
     }
 
     private static String kindOf(ConstraintDiff constraintDiff) {

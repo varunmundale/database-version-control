@@ -31,7 +31,6 @@ class SqlDdlParserPostgresTest {
         SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(ddl);
 
         assertEquals("orders", operation.tableName());
-        assertFalse(operation.ifNotExists());
         assertEquals(3, operation.columns().size());
 
         ColumnModel id = operation.columns().get(0);
@@ -67,12 +66,23 @@ class SqlDdlParserPostgresTest {
 
 
     @Test
-    void parsesCreateTableIfNotExistsAndSchemaQualifiedNames() {
+    void parsesSchemaQualifiedNames() {
         SchemaOperation.CreateTable operation = (SchemaOperation.CreateTable) parser.parse(
-                "CREATE TABLE IF NOT EXISTS public.orders (id INT NOT NULL)");
+                "CREATE TABLE public.orders (id INT NOT NULL)");
 
         assertEquals("orders", operation.tableName());
-        assertTrue(operation.ifNotExists());
+    }
+
+    /**
+     * dbgit rebuilds a schema by replaying a history, so a statement must mean the same thing every time it runs -
+     * and IF NOT EXISTS means one thing on a branch that already has the table, another on one that doesn't.
+     */
+    @Test
+    void rejectsCreateTableIfNotExists() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("CREATE TABLE IF NOT EXISTS orders (id INT NOT NULL)"));
+
+        assertTrue(exception.getMessage().contains("IF NOT EXISTS"), exception.getMessage());
     }
 
     @Test
@@ -165,7 +175,81 @@ class SqlDdlParserPostgresTest {
 
     @Test
     void rejectsUnsupportedStatements() {
-        assertThrows(IllegalArgumentException.class, () -> parser.parse("DROP TABLE orders"));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse("CREATE VIEW v AS SELECT 1"));
+    }
+
+    @Test
+    void parsesDropTable() {
+        SchemaOperation.DropTable operation = (SchemaOperation.DropTable) parser.parse("DROP TABLE orders");
+
+        assertEquals("orders", operation.tableName());
+    }
+
+    @Test
+    void parsesAlterTableRenameTo() {
+        SchemaOperation.RenameTable operation = (SchemaOperation.RenameTable) parser.parse(
+                "ALTER TABLE orders RENAME TO purchases");
+
+        assertEquals("orders", operation.tableName());
+        assertEquals("purchases", operation.newName());
+    }
+
+    @Test
+    void rejectsDropTableIfExists() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("DROP TABLE IF EXISTS orders"));
+
+        assertTrue(exception.getMessage().contains("IF EXISTS"), exception.getMessage());
+    }
+
+    @Test
+    void rejectsDropTableCascade() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("DROP TABLE orders CASCADE"));
+
+        assertTrue(exception.getMessage().contains("CASCADE"), exception.getMessage());
+    }
+
+    @Test
+    void rejectsDropTableRestrict() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parse("DROP TABLE orders RESTRICT"));
+    }
+
+    @Test
+    void rejectsDropTemporaryTable() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("DROP TEMPORARY TABLE orders"));
+
+        assertTrue(exception.getMessage().contains("TEMPORARY"), exception.getMessage());
+    }
+
+    @Test
+    void rejectsDroppingSeveralTablesInOneStatement() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parse("DROP TABLE orders, customers"));
+    }
+
+    @Test
+    void rejectsAlterTableIfExistsRenameTo() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("ALTER TABLE IF EXISTS orders RENAME TO purchases"));
+
+        assertTrue(exception.getMessage().contains("IF EXISTS"), exception.getMessage());
+    }
+
+    @Test
+    void rejectsAlterTableIfExistsOnOtherForms() {
+        assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("ALTER TABLE IF EXISTS orders ADD COLUMN total INT"));
+    }
+
+    /** MySQL's table-rename spelling - out of scope, since ALTER TABLE ... RENAME TO covers every dialect. */
+    @Test
+    void rejectsTheRenameTableSpelling() {
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> parser.parse("RENAME TABLE orders TO purchases"));
+
+        assertTrue(exception.getMessage().contains("ALTER TABLE"), exception.getMessage());
+        assertTrue(exception.getMessage().contains("RENAME TO"), exception.getMessage());
     }
 
     @Test

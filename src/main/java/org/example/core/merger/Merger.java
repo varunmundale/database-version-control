@@ -98,14 +98,22 @@ public final class Merger {
     }
 
     /**
-     * Everything {@link Differ} found genuinely conflicting between the two branches: a column, constraint or index
-     * both of them changed since they diverged, matched by stable id. A difference only one branch is responsible
-     * for is not here - that is exactly what the merge is bringing in. Named for the user rather than rendered as
-     * a tree: a merge reports why it stopped, it does not draw the diff.
+     * Everything {@link Differ} found genuinely conflicting between the two branches: a table, column, constraint
+     * or index both of them changed since they diverged, matched by stable id. A difference only one branch is
+     * responsible for is not here - that is exactly what the merge is bringing in. Named for the user rather than
+     * rendered as a tree: a merge reports why it stopped, it does not draw the diff.
+     *
+     * <p>A table-level conflict - both branches created, dropped or renamed the same table - is reported on its
+     * own, before its members: a table one side dropped and the other renamed has no members left to compare, so
+     * without this line such a conflict would otherwise report nothing at all and the merge would proceed onto
+     * whichever side happened to run second.
      */
     private static List<String> conflicts(HistoryDiff diff) {
         List<String> lines = new ArrayList<>();
         for (TableDiff tableDiff : diff.tables()) {
+            if (diff.isConflicting(tableDiff.id())) {
+                lines.add("table '" + tableDiff.tableName() + "'");
+            }
             String table = "table '" + tableDiff.tableName() + "', ";
             tableDiff.columnDiffs().stream()
                     .filter(columnDiff -> diff.isConflicting(columnDiff.id()))

@@ -15,7 +15,7 @@ import java.util.function.UnaryOperator;
  * helpers below, rather than once per member kind.
  */
 public record TableModel(StableId id, String schema, String name, List<ColumnModel> columns,
-                         List<IndexModel> indexes, List<ConstraintModel> constraints) {
+                         List<IndexModel> indexes, List<ConstraintModel> constraints) implements SchemaElement<TableModel> {
     public TableModel {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(schema, "schema must not be null");
@@ -51,6 +51,28 @@ public record TableModel(StableId id, String schema, String name, List<ColumnMod
 
     public TableModel retypeColumn(String columnName, String newType) {
         return replaceColumn(columnName, column -> column.retyped(newType));
+    }
+
+    /**
+     * The same table under a new name; its stable id - and therefore every column, constraint and index id derived
+     * from it via {@link StableId#forColumn}/{@link StableId#forConstraint}/{@link StableId#forIndex} - is carried
+     * over unchanged. Re-deriving the id from the new name would make every member of the table read as replaced.
+     */
+    public TableModel renamedTo(String newName) {
+        return new TableModel(id, schema, newName, columns, indexes, constraints);
+    }
+
+    /**
+     * True when this table, matched by id with another, is a different table to report - which for a table means
+     * it was renamed, and nothing else. Deliberately narrower than every other {@link SchemaElement}: two branches
+     * adding different columns have both "changed the table" in the everyday sense, and if that counted here,
+     * {@link org.example.core.differ.SideChanges} would call it a conflict and refuse a merge that works today.
+     * What the table's contents did is already reported, member by member, by
+     * {@link org.example.core.differ.TableDiff}.
+     */
+    @Override
+    public boolean differsFrom(TableModel other) {
+        return !name.equals(other.name);
     }
 
     private TableModel replaceColumn(String columnName, UnaryOperator<ColumnModel> rewrite) {

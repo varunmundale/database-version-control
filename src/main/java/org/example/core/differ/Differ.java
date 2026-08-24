@@ -40,8 +40,6 @@ import java.util.stream.Collectors;
  * side are attributed; one both branches already share has nothing to report.
  */
 public final class Differ {
-    private static final String SCHEMA = "public";
-
     private final Replayer replayer;
     private final DatabaseDiff databaseDiff;
 
@@ -123,8 +121,7 @@ public final class Differ {
         for (ChangeSet changeset : history) {
             String table = replayer.tableName(changeset.ddl());
             TableModel before = tables.get(table);
-            TableModel after = replayer.apply(SCHEMA, changeset.ddl(), before);
-            tables.put(table, after);
+            TableModel after = replayer.apply(tables, changeset.ddl());
             if (onlyIds.contains(changeset.id())) {
                 recordTouched(before, after, changeset, byObject);
             }
@@ -132,9 +129,17 @@ public final class Differ {
         return byObject;
     }
 
+    /**
+     * A dropped table has no {@code after} and a created one no {@code before}; {@link TableDiff#between} already
+     * treats a missing side as contributing nothing, the same way it does for a table diffed at the whole-schema
+     * level.
+     */
     private static void recordTouched(TableModel before, TableModel after, ChangeSet changeset,
                                       Map<StableId, List<ChangeSet>> byObject) {
-        TableDiff delta = TableDiff.between(after.name(), before, after);
+        TableDiff delta = TableDiff.between(before, after);
+        if (delta.tableChanged()) {
+            record(byObject, delta.id(), changeset);
+        }
         delta.columnDiffs().forEach(columnDiff -> record(byObject, columnDiff.id(), changeset));
         delta.constraintDiffs().forEach(constraintDiff -> record(byObject, constraintDiff.id(), changeset));
         delta.indexDiffs().forEach(indexDiff -> record(byObject, indexDiff.id(), changeset));

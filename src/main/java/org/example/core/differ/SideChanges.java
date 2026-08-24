@@ -33,8 +33,14 @@ record SideChanges(Set<StableId> left, Set<StableId> right) {
     static SideChanges since(Map<String, TableModel> base, List<TableDiff> tables) {
         Set<StableId> left = new LinkedHashSet<>();
         Set<StableId> right = new LinkedHashSet<>();
+        // Keyed by id, not by tableDiff.tableName(): after a one-sided rename the base table's name is the old
+        // one, and looking it up by the diff's (possibly new) name would miss it entirely - reporting every one
+        // of its columns as freshly added by whichever side actually just renamed it, a conflict neither branch
+        // is responsible for.
+        Map<StableId, TableModel> baseById = TableDiff.byId(base.values());
         for (TableDiff tableDiff : tables) {
-            TableModel baseTable = base.get(tableDiff.tableName());
+            TableModel baseTable = baseById.get(tableDiff.id());
+            collect(left, right, List.of(tableDiff), baseTable == null ? List.of() : List.of(baseTable));
             collect(left, right, tableDiff.columnDiffs(), baseTable == null ? List.of() : baseTable.columns());
             collect(left, right, tableDiff.constraintDiffs(), baseTable == null ? List.of() : baseTable.constraints());
             collect(left, right, tableDiff.indexDiffs(), baseTable == null ? List.of() : baseTable.indexes());

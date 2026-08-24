@@ -79,6 +79,24 @@ class RejectedDdlIntegrationTest extends DbGitIntegrationTest {
             "DROP INDEX, which names no table to attribute it to"
                     + "| DROP INDEX idx_orders_total;"
                     + "| DROP INDEX is not supported",
+            "DROP TABLE IF EXISTS - a statement must mean the same thing on every replay"
+                    + "| DROP TABLE IF EXISTS orders;"
+                    + "| IF EXISTS",
+            "DROP TABLE ... CASCADE - can drop constraints on other tables replay never sees"
+                    + "| DROP TABLE orders CASCADE;"
+                    + "| CASCADE",
+            "DROP TABLE naming several tables at once"
+                    + "| DROP TABLE orders, scratch;"
+                    + "| Could not parse",
+            "CREATE TABLE IF NOT EXISTS - a statement must mean the same thing on every replay"
+                    + "| CREATE TABLE IF NOT EXISTS orders (id INT);"
+                    + "| IF NOT EXISTS",
+            "ALTER TABLE IF EXISTS - a statement must mean the same thing on every replay"
+                    + "| ALTER TABLE IF EXISTS orders RENAME TO purchases;"
+                    + "| IF EXISTS",
+            "RENAME TABLE - MySQL's own spelling, redirected to ALTER TABLE ... RENAME TO"
+                    + "| RENAME TABLE orders TO purchases;"
+                    + "| ALTER TABLE",
     })
     void aStatementTheModelCannotRepresentIsRefused(String description, String ddl, String reason) {
         add("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10, 2));");

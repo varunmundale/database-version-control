@@ -16,10 +16,14 @@ import java.util.List;
  * DDL {@code dbgit add} accepts, and {@code sealed} is what makes the compiler enforce that the applier covers it.
  */
 public sealed interface SchemaOperation {
-    /** The table this operation creates or targets. */
+    /**
+     * The table this operation creates or targets - for {@link DropTable} and {@link RenameTable}, the name the
+     * table has <em>before</em> the statement runs, which is what {@link Replayer} looks the current
+     * {@link org.example.models.schema.TableModel} up by.
+     */
     String tableName();
 
-    record CreateTable(String tableName, boolean ifNotExists, List<ColumnModel> columns) implements SchemaOperation {
+    record CreateTable(String tableName, List<ColumnModel> columns) implements SchemaOperation {
     }
 
     record AddColumn(String tableName, ColumnModel column) implements SchemaOperation {
@@ -29,6 +33,17 @@ public sealed interface SchemaOperation {
     }
 
     record RenameColumn(String tableName, String oldName, String newName) implements SchemaOperation {
+    }
+
+    /** Leaves no table behind under {@code tableName}; see {@link Replayer#apply}. */
+    record DropTable(String tableName) implements SchemaOperation {
+    }
+
+    /**
+     * The table {@code tableName} carries its {@link org.example.models.schema.StableId} over under
+     * {@code newName} - see {@link org.example.models.schema.TableModel#renamedTo}.
+     */
+    record RenameTable(String tableName, String newName) implements SchemaOperation {
     }
 
     record AlterColumnType(String tableName, String columnName, String newType) implements SchemaOperation {

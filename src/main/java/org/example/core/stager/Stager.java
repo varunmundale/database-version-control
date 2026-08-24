@@ -18,8 +18,6 @@ import java.util.Objects;
  * changeset, executes it for real against the branch's own database, then marks it applied.
  */
 public final class Stager {
-    private static final String SCHEMA = "public";
-
     private final Forker forker;
     private final Replayer replayer;
     private final BranchConnections connections;
@@ -50,7 +48,7 @@ public final class Stager {
 
         String tableName = replayer.tableName(statement);
         Map<String, TableModel> currentSchema = replayer.replay(versioningService.branchHistory(branch));
-        TableModel updated = replayer.apply(SCHEMA, statement, currentSchema.get(tableName));
+        TableModel updated = replayer.apply(currentSchema, statement);
 
         long changesetId = versioningService.stageChangeset(branch, statement);
 
@@ -65,6 +63,8 @@ public final class Stager {
         }
 
         versioningService.markApplied(changesetId);
-        return new StageResult(changesetId, updated.name(), updated.columns().size());
+        return updated == null
+                ? new StageResult.Dropped(changesetId, tableName)
+                : new StageResult.Applied(changesetId, updated.name(), updated.columns().size());
     }
 }

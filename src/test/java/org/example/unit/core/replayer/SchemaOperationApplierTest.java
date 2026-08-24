@@ -15,7 +15,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,7 +24,7 @@ class SchemaOperationApplierTest {
 
     @Test
     void createTableBuildsColumnsInOrderWithFreshStableIds() {
-        SchemaOperation.CreateTable op = new SchemaOperation.CreateTable("orders", false, List.of(
+        SchemaOperation.CreateTable op = new SchemaOperation.CreateTable("orders", List.of(
                 ColumnModel.unassigned("id", "INT", false, null),
                 ColumnModel.unassigned("total", "NUMERIC(10,2)", true, null)));
 
@@ -36,23 +36,49 @@ class SchemaOperationApplierTest {
     }
 
     @Test
-    void createTableIfNotExistsReturnsTheExistingTableUnchanged() {
-        TableModel existing = applier.apply("public", new SchemaOperation.CreateTable("orders", false,
-                List.of(ColumnModel.unassigned("id", "INT", false, null))), null);
-
-        TableModel result = applier.apply("public",
-                new SchemaOperation.CreateTable("orders", true, List.of()), existing);
-
-        assertSame(existing, result);
-    }
-
-    @Test
-    void createTableWithoutIfNotExistsOnAnExistingTableThrows() {
-        TableModel existing = applier.apply("public", new SchemaOperation.CreateTable("orders", false,
+    void createTableOnAnExistingTableThrows() {
+        TableModel existing = applier.apply("public", new SchemaOperation.CreateTable("orders",
                 List.of(ColumnModel.unassigned("id", "INT", false, null))), null);
 
         assertThrows(IllegalArgumentException.class, () -> applier.apply("public",
-                new SchemaOperation.CreateTable("orders", false, List.of()), existing));
+                new SchemaOperation.CreateTable("orders", List.of()), existing));
+    }
+
+    @Test
+    void dropTableLeavesNoTableBehind() {
+        TableModel existing = table("id");
+
+        TableModel result = applier.apply("public", new SchemaOperation.DropTable("orders"), existing);
+
+        assertNull(result);
+    }
+
+    @Test
+    void droppingAnUnknownTableThrows() {
+        assertThrows(IllegalArgumentException.class,
+                () -> applier.apply("public", new SchemaOperation.DropTable("orders"), null));
+    }
+
+    @Test
+    void renameTableKeepsTheTablesStableIdAndEveryMemberId() {
+        TableModel existing = applier.apply("public",
+                new SchemaOperation.CreateIndex("orders", "idx_orders_total", false, List.of("total")), orders());
+        StableId originalId = existing.id();
+        StableId columnId = column(existing, "id").id();
+        StableId indexId = existing.indexes().getFirst().id();
+
+        TableModel renamed = applier.apply("public", new SchemaOperation.RenameTable("orders", "purchases"), existing);
+
+        assertEquals("purchases", renamed.name());
+        assertEquals(originalId, renamed.id());
+        assertEquals(columnId, column(renamed, "id").id());
+        assertEquals(indexId, renamed.indexes().getFirst().id());
+    }
+
+    @Test
+    void renamingAnUnknownTableThrows() {
+        assertThrows(IllegalArgumentException.class,
+                () -> applier.apply("public", new SchemaOperation.RenameTable("orders", "purchases"), null));
     }
 
     @Test
@@ -135,7 +161,7 @@ class SchemaOperationApplierTest {
         List<ColumnModel> columns = java.util.Arrays.stream(columnNames)
                 .map(name -> ColumnModel.unassigned(name, "INT", true, null))
                 .toList();
-        return applier.apply("public", new SchemaOperation.CreateTable("orders", false, columns), null);
+        return applier.apply("public", new SchemaOperation.CreateTable("orders", columns), null);
     }
 
     private static ColumnModel column(TableModel table, String name) {
@@ -217,7 +243,7 @@ class SchemaOperationApplierTest {
     }
 
     private TableModel orders() {
-        return applier.apply("public", new SchemaOperation.CreateTable("orders", false, List.of(
+        return applier.apply("public", new SchemaOperation.CreateTable("orders", List.of(
                 ColumnModel.unassigned("id", "INT", false, null),
                 ColumnModel.unassigned("customer_id", "INT", true, null),
                 ColumnModel.unassigned("total", "NUMERIC(10,2)", true, null))), null);

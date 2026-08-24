@@ -58,4 +58,20 @@ class SqlDdlParserH2Test {
                 "CREATE TABLE orders (id INT AUTO_INCREMENT)");
         assertEquals("AUTO_INCREMENT", autoIncrement.columns().getFirst().generatedAs());
     }
+
+    @Test
+    void parsesDropTableTheSameWayEveryDialectDoes() {
+        SchemaOperation.DropTable operation = (SchemaOperation.DropTable) parser.parse("DROP TABLE orders");
+
+        assertEquals("orders", operation.tableName());
+    }
+
+    @Test
+    void parsesRenameToTheSameWayEveryDialectDoes() {
+        SchemaOperation.RenameTable operation = (SchemaOperation.RenameTable) parser.parse(
+                "ALTER TABLE orders RENAME TO purchases");
+
+        assertEquals("orders", operation.tableName());
+        assertEquals("purchases", operation.newName());
+    }
 }

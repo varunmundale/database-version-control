@@ -35,7 +35,11 @@ public final class AddCommand extends Command {
 
         String branch = context.branch();
         StageResult result = stager.stage(context.request(), statement);
-        return print(List.of("Applied changeset #" + result.changesetId() + " for branch '" + branch + "': table '"
-                + result.tableName() + "' now has " + result.columnCount() + " column(s)."));
+        String detail = switch (result) {
+            case StageResult.Applied applied -> "table '" + applied.tableName() + "' now has "
+                    + applied.columnCount() + " column(s).";
+            case StageResult.Dropped dropped -> "table '" + dropped.tableName() + "' dropped.";
+        };
+        return print(List.of("Applied changeset #" + result.changesetId() + " for branch '" + branch + "': " + detail));
     }
 }

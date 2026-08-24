@@ -29,7 +29,7 @@ class TableDiffTest {
     void aTablePresentOnBothSidesAndUnchangedHasNothingToReport() {
         TableModel orders = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
 
-        TableDiff tableDiff = TableDiff.between("orders", orders, orders);
+        TableDiff tableDiff = TableDiff.between(orders, orders);
 
         assertTrue(tableDiff.isEmpty());
         assertEquals(Side.BOTH, tableDiff.side());
@@ -40,7 +40,7 @@ class TableDiffTest {
     void aMissingSideReportsEveryColumnOfTheSideThatExists() {
         TableModel orders = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
 
-        TableDiff leftOnly = TableDiff.between("orders", orders, null);
+        TableDiff leftOnly = TableDiff.between(orders, null);
 
         assertTrue(leftOnly.onlyOnLeft());
         assertFalse(leftOnly.isEmpty());
@@ -54,7 +54,7 @@ class TableDiffTest {
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));",
                 "ALTER TABLE orders ADD COLUMN placed_at TIMESTAMPTZ;");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertEquals(List.of("placed_at"), tableDiff.columnDiffs().stream().map(ColumnDiff::columnName).toList());
         assertEquals(Side.RIGHT, tableDiff.columnDiffs().getFirst().side());
@@ -66,7 +66,7 @@ class TableDiffTest {
                 "ALTER TABLE orders RENAME COLUMN total TO amount;");
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertEquals(1, tableDiff.columnDiffs().size(), "a rename is one column that differs, not a drop plus an add");
         ColumnDiff columnDiff = tableDiff.columnDiffs().getFirst();
@@ -81,7 +81,7 @@ class TableDiffTest {
                 "ALTER TABLE orders ADD COLUMN zebra INT;",
                 "ALTER TABLE orders ADD COLUMN alpha INT;");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertEquals(List.of("alpha", "zebra"), tableDiff.columnDiffs().stream().map(ColumnDiff::columnName).toList());
     }
@@ -101,7 +101,7 @@ class TableDiffTest {
                 "ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);");
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL);");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertTrue(tableDiff.columnDiffs().isEmpty(), "the column itself is unchanged");
         assertEquals(List.of("orders_pkey"),
@@ -117,7 +117,7 @@ class TableDiffTest {
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL, email TEXT);",
                 "ALTER TABLE orders ADD CONSTRAINT orders_key UNIQUE (email);");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertEquals(1, tableDiff.constraintDiffs().size());
         assertEquals(Side.BOTH, tableDiff.constraintDiffs().getFirst().side());
@@ -130,7 +130,7 @@ class TableDiffTest {
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL);",
                 "ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);");
 
-        assertTrue(TableDiff.between("orders", left, right).isEmpty());
+        assertTrue(TableDiff.between(left, right).isEmpty());
     }
 
     @Test
@@ -140,7 +140,7 @@ class TableDiffTest {
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL, total INT);",
                 "CREATE UNIQUE INDEX idx_orders_total ON orders (total);");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertEquals(List.of("idx_orders_total"), tableDiff.indexDiffs().stream().map(IndexDiff::indexName).toList());
         assertEquals(Side.BOTH, tableDiff.indexDiffs().getFirst().side());
@@ -156,7 +156,7 @@ class TableDiffTest {
         TableModel right = table("CREATE TABLE orders (id INT NOT NULL, total INT);",
                 "CREATE INDEX idx_orders_total ON orders (total);");
 
-        TableDiff tableDiff = TableDiff.between("orders", left, right);
+        TableDiff tableDiff = TableDiff.between(left, right);
 
         assertTrue(tableDiff.indexDiffs().isEmpty(), "the index still covers the same column, by stable id");
         assertEquals(List.of("amount"), tableDiff.columnDiffs().stream().map(ColumnDiff::columnName).toList());
@@ -168,11 +168,34 @@ class TableDiffTest {
                 "ALTER TABLE orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);",
                 "CREATE INDEX idx_orders_total ON orders (total);");
 
-        TableDiff leftOnly = TableDiff.between("orders", orders, null);
+        TableDiff leftOnly = TableDiff.between(orders, null);
 
         assertEquals(1, leftOnly.constraintDiffs().size());
         assertEquals(1, leftOnly.indexDiffs().size());
         assertEquals(Side.LEFT, leftOnly.constraintDiffs().getFirst().side());
         assertEquals(Side.LEFT, leftOnly.indexDiffs().getFirst().side());
+    }
+
+    @Test
+    void aRenamedTableIsOneTableWhoseNameDiffersRatherThanTwo() {
+        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL);");
+        TableModel purchases = orders.renamedTo("purchases");
+
+        TableDiff tableDiff = TableDiff.between(orders, purchases);
+
+        assertEquals(Side.BOTH, tableDiff.side(), "matched by id, so both sides are present - not one gone, one added");
+        assertEquals(orders.id(), tableDiff.id());
+        assertEquals("orders", tableDiff.tableName(), "left preferred, the same convention ColumnDiff uses");
+        assertTrue(tableDiff.tableChanged());
+        assertTrue(tableDiff.columnDiffs().isEmpty(), "the rename carried every column's id over unchanged");
+    }
+
+    @Test
+    void aPureRenameIsNotEmpty() {
+        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL);");
+        TableModel purchases = orders.renamedTo("purchases");
+
+        assertFalse(TableDiff.between(orders, purchases).isEmpty(),
+                "a rename with no other change must still be reported, or dbgit diff would never show it");
     }
 }

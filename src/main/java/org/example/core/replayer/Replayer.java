@@ -38,15 +38,18 @@ public final class Replayer {
         this.ddlParser = Objects.requireNonNull(ddlParser, "ddlParser must not be null");
     }
 
-    /** Rebuilds a schema by reading {@code changesets} and applying each one's ddl, in order. Pure in-memory. */
+    /**
+     * Rebuilds a schema by reading {@code changesets} and applying each one's ddl, in order, into a fresh map. Pure
+     * in-memory. The map never holds a {@code null} value: {@link #apply} removes a dropped or renamed-away table's
+     * key rather than storing one, so nothing downstream has to guard against it.
+     */
     public Map<String, TableModel> replay(List<ChangeSet> changesets) {
         Map<String, TableModel> schema = new LinkedHashMap<>();
         for (ChangeSet changeset : changesets) {
             if (changeset.status() != ChangesetStatus.APPLIED && changeset.status() != ChangesetStatus.COMMIT) {
                 continue;
             }
-            SchemaOperation operation = ddlParser.parse(changeset.ddl());
-            schema.put(operation.tableName(), operationApplier.apply(SCHEMA, operation, schema.get(operation.tableName())));
+            apply(schema, changeset.ddl());
         }
         return schema;
     }
@@ -57,11 +60,36 @@ public final class Replayer {
     }
 
     /**
-     * Builds or mutates the internal representation of one table from a DDL statement.
+     * Applies one DDL statement to {@code schema}, mutating it in place, and returns the table's new state (or
+     * {@code null} if the statement was a {@code DROP TABLE}).
      *
-     * @param existing the table's current state, or {@code null} if it does not exist yet
+     * <p>{@link SchemaOperationApplier} edits one {@link TableModel} it is handed and knows nothing of the schema
+     * as a whole, so moving its answer to the right map key - the same key for most operations, a different one
+     * for a rename, no key at all for a drop - is this method's job, and the reason it takes the whole map rather
+     * than one table. It is also the only place two things can be checked, since only here is the rest of the
+     * schema visible: a rename onto a name already taken, and a fresh table minting the stable id a still-live
+     * table already carries under a different name - which {@code CREATE TABLE orders} can do the moment something
+     * else has been renamed away from {@code orders}, since a table's id is derived from its name (see
+     * {@link TableModel#create}) and nothing else stops the same id being minted twice.
      */
-    public TableModel apply(String schema, String ddl, TableModel existing) {
-        return operationApplier.apply(schema, ddlParser.parse(ddl), existing);
+    public TableModel apply(Map<String, TableModel> schema, String ddl) {
+        SchemaOperation operation = ddlParser.parse(ddl);
+        TableModel existing = schema.get(operation.tableName());
+        String targetName = operation instanceof SchemaOperation.RenameTable rename ? rename.newName() : operation.tableName();
+        if (!targetName.equals(operation.tableName()) && schema.containsKey(targetName)) {
+            throw new IllegalArgumentException("Table already exists: " + targetName);
+        }
+        TableModel updated = operationApplier.apply(SCHEMA, operation, existing);
+        if (updated != null && schema.values().stream().anyMatch(table -> table != existing && table.id().equals(updated.id()))) {
+            throw new IllegalArgumentException("Table already exists: " + updated.name()
+                    + " (a live table already carries this stable id, from an earlier rename)");
+        }
+        if (updated == null || !updated.name().equals(operation.tableName())) {
+            schema.remove(operation.tableName());
+        }
+        if (updated != null) {
+            schema.put(updated.name(), updated);
+        }
+        return updated;
     }
 }

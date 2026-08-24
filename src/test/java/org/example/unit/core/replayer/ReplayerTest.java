@@ -13,7 +13,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReplayerTest {
@@ -80,6 +82,64 @@ class ReplayerTest {
         ColumnModel col2 = column(renamedSide.get("orders"), "col2");
         ColumnModel col1 = column(modifiedSide.get("orders"), "col1");
         assertEquals(col1.id(), col2.id());
+    }
+
+    @Test
+    void renamingATablePreservesItsStableIdAndEveryColumnIdUnderTheNewKey() {
+        List<ChangeSet> history = List.of(
+                changeset("CREATE TABLE orders (id INT NOT NULL, note TEXT);"),
+                changeset("ALTER TABLE orders RENAME TO purchases;"));
+
+        Map<String, TableModel> before = replayer.replay(List.of(history.get(0)));
+        Map<String, TableModel> after = replayer.replay(history);
+
+        TableModel originalOrders = before.get("orders");
+        TableModel renamedPurchases = after.get("purchases");
+        assertEquals(originalOrders.id(), renamedPurchases.id());
+        assertEquals(column(originalOrders, "note").id(), column(renamedPurchases, "note").id());
+    }
+
+    @Test
+    void renamingATableLeavesNothingUnderTheOldName() {
+        List<ChangeSet> history = List.of(
+                changeset("CREATE TABLE orders (id INT NOT NULL);"),
+                changeset("ALTER TABLE orders RENAME TO purchases;"));
+
+        Map<String, TableModel> after = replayer.replay(history);
+
+        assertFalse(after.containsKey("orders"));
+        assertTrue(after.containsKey("purchases"));
+    }
+
+    @Test
+    void droppingATableRemovesItFromTheSchema() {
+        List<ChangeSet> history = List.of(
+                changeset("CREATE TABLE orders (id INT NOT NULL);"),
+                changeset("DROP TABLE orders;"));
+
+        Map<String, TableModel> after = replayer.replay(history);
+
+        assertFalse(after.containsKey("orders"));
+    }
+
+    @Test
+    void renamingATableOntoANameAlreadyTakenIsRefused() {
+        List<ChangeSet> history = List.of(
+                changeset("CREATE TABLE orders (id INT NOT NULL);"),
+                changeset("CREATE TABLE purchases (id INT NOT NULL);"),
+                changeset("ALTER TABLE orders RENAME TO purchases;"));
+
+        assertThrows(IllegalArgumentException.class, () -> replayer.replay(history));
+    }
+
+    @Test
+    void renamingATableThenCreatingOneUnderTheOldNameIsRefused() {
+        List<ChangeSet> history = List.of(
+                changeset("CREATE TABLE orders (id INT NOT NULL);"),
+                changeset("ALTER TABLE orders RENAME TO purchases;"),
+                changeset("CREATE TABLE orders (id INT NOT NULL);"));
+
+        assertThrows(IllegalArgumentException.class, () -> replayer.replay(history));
     }
 
     private static ColumnModel column(TableModel table, String name) {

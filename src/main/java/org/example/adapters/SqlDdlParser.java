@@ -5,6 +5,7 @@ import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.alter.AlterExpression;
+import net.sf.jsqlparser.statement.alter.AlterOperation;
 import net.sf.jsqlparser.statement.create.index.CreateIndex;
 import net.sf.jsqlparser.statement.create.table.ColumnDefinition;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
@@ -40,6 +41,12 @@ import java.util.Objects;
  * cannot see is a constraint it cannot diff, merge or replay onto a forked branch. {@code NOT NULL},
  * {@code DEFAULT} and the dialect's identity/auto-increment spec are exempt: they are properties of the column
  * itself, and the model already carries them - see {@link ColumnSpecs}.
+ *
+ * <p>{@code IF EXISTS}/{@code IF NOT EXISTS}, on any statement, is rejected rather than honored: dbgit rebuilds a
+ * schema by replaying a history, so a statement must mean the same thing every time it runs, and a conditional
+ * clause means one thing on a branch that has the object and another on one that doesn't. {@code CASCADE} on a
+ * {@code DROP TABLE} is rejected for the same reason from the other direction - it can silently drop constraints
+ * on other tables that replay never sees and {@code dbgit diff} can never report.
  */
 public final class SqlDdlParser implements DdlParser {
     private static final String UNIQUE = "UNIQUE";
@@ -64,13 +71,40 @@ public final class SqlDdlParser implements DdlParser {
         if (statement instanceof CreateIndex createIndex) {
             return toCreateIndex(createIndex, ddl);
         }
-        if (statement instanceof Drop drop && "INDEX".equalsIgnoreCase(drop.getType())) {
+        if (statement instanceof Drop drop) {
+            return toDrop(drop, ddl);
+        }
+        throw unsupported(ddl);
+    }
+
+    private SchemaOperation toDrop(Drop drop, String ddl) {
+        if ("INDEX".equalsIgnoreCase(drop.getType())) {
             throw new IllegalArgumentException("DROP INDEX is not supported: " + ddl
                     + ". A dropped index names no table, and dbgit replays history one table at a time, so it cannot"
                     + " tell which table the index belonged to. Drop the constraint that owns it instead, e.g."
                     + " ALTER TABLE <table> DROP CONSTRAINT <name>.");
         }
-        throw unsupported(ddl);
+        if (!"TABLE".equalsIgnoreCase(drop.getType())) {
+            throw unsupported(ddl);
+        }
+        if (drop.isIfExists()) {
+            throw new IllegalArgumentException("DROP TABLE IF EXISTS is not supported: " + ddl
+                    + ". A statement must mean the same thing every time dbgit replays it, and IF EXISTS means one"
+                    + " thing on a branch that has the table and another on one that doesn't. Write DROP TABLE"
+                    + " <table>.");
+        }
+        if (drop.isUsingTemporary()) {
+            throw new IllegalArgumentException("DROP TEMPORARY TABLE is not supported: " + ddl
+                    + ". A temporary table is not part of a versioned schema.");
+        }
+        List<String> parameters = drop.getParameters();
+        if (parameters != null && !parameters.isEmpty()) {
+            throw new IllegalArgumentException("DROP TABLE " + String.join(" ", parameters) + " is not supported: "
+                    + ddl + ". CASCADE can drop constraints on other tables that replay never sees and dbgit diff"
+                    + " can never report. Drop the referencing constraint first, e.g."
+                    + " ALTER TABLE <other table> DROP CONSTRAINT <name>.");
+        }
+        return new SchemaOperation.DropTable(SqlIdentifiers.normalize(drop.getName().getName()));
     }
 
     private static Statement parseStatement(String ddl) {
@@ -82,15 +116,27 @@ public final class SqlDdlParser implements DdlParser {
     }
 
     private SchemaOperation toCreateTable(CreateTable createTable, String ddl) {
+        if (createTable.isIfNotExists()) {
+            throw new IllegalArgumentException("CREATE TABLE IF NOT EXISTS is not supported: " + ddl
+                    + ". A statement must mean the same thing every time dbgit replays it, and IF NOT EXISTS means"
+                    + " one thing on a branch that already has the table and another on one that doesn't. Write"
+                    + " CREATE TABLE <table> (...).");
+        }
         String tableName = SqlIdentifiers.normalize(createTable.getTable().getName());
         constraintMapper.rejectTableLevelConstraints(createTable, tableName);
         List<ColumnModel> columns = createTable.getColumnDefinitions().stream()
                 .map(column -> columnMapper.toColumnModel(column, tableName, grammar.identitySpecs()))
                 .toList();
-        return new SchemaOperation.CreateTable(tableName, createTable.isIfNotExists(), columns);
+        return new SchemaOperation.CreateTable(tableName, columns);
     }
 
     private SchemaOperation toAlterOperation(Alter alter, String ddl) {
+        if (alter.isUseTableIfExists()) {
+            throw new IllegalArgumentException("ALTER TABLE IF EXISTS is not supported: " + ddl
+                    + ". A statement must mean the same thing every time dbgit replays it, and IF EXISTS means one"
+                    + " thing on a branch that has the table and another on one that doesn't. Write ALTER TABLE"
+                    + " <table> ...");
+        }
         List<AlterExpression> expressions = alter.getAlterExpressions();
         if (expressions.size() != 1) {
             throw unsupported(ddl);
@@ -98,6 +144,9 @@ public final class SqlDdlParser implements DdlParser {
         AlterExpression expression = expressions.get(0);
         String tableName = SqlIdentifiers.normalize(alter.getTable().getName());
 
+        if (expression.getOperation() == AlterOperation.RENAME_TABLE) {
+            return new SchemaOperation.RenameTable(tableName, SqlIdentifiers.normalize(expression.getNewTableName()));
+        }
         if (grammar.isRetypeOperation(expression.getOperation())) {
             return toAlterColumnType(tableName, soleColumn(expression, ddl), ddl);
         }
@@ -153,8 +202,9 @@ public final class SqlDdlParser implements DdlParser {
 
     private IllegalArgumentException unsupported(String statement) {
         return new IllegalArgumentException("Unsupported DDL statement: " + statement
-                + ". Supported: CREATE TABLE (columns only); ALTER TABLE ADD|DROP|RENAME COLUMN;"
+                + ". Supported: CREATE TABLE (columns only); DROP TABLE; ALTER TABLE ADD|DROP|RENAME COLUMN;"
                 + " " + grammar.retypeSyntax() + "; ALTER TABLE ADD CONSTRAINT ...; ALTER TABLE DROP CONSTRAINT;"
-                + " CREATE [UNIQUE] INDEX.");
+                + " CREATE [UNIQUE] INDEX; ALTER TABLE <table> RENAME TO <table> (RENAME TABLE ... TO ... is not"
+                + " supported - write it as ALTER TABLE <table> RENAME TO <table>).");
     }
 }

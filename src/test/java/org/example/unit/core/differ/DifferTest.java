@@ -261,6 +261,87 @@ class DifferTest {
         ), lines);
     }
 
+    @Test
+    void droppingATableRendersTheDropUnderTheTableNodeAndNoMemberNodes() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
+        CommitEntry drop = commit("DROP TABLE orders;");
+
+        List<String> lines = diff("left", "right", List.of(create), List.of(create, drop));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- orders",
+                "  |- < DROP TABLE orders;"
+        ), lines);
+    }
+
+    @Test
+    void aTableCreatedOnOneSideRendersItsStatementUnderTheTableNode() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL);");
+        CommitEntry createScratch = commit("CREATE TABLE scratch (id INT NOT NULL);");
+
+        List<String> lines = diff("left", "right", List.of(create, createScratch), List.of(create));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- scratch",
+                "  |- > CREATE TABLE scratch (id INT NOT NULL);"
+        ), lines);
+    }
+
+    @Test
+    void renamingATableOnOneSideRendersTheStatementUnderTheTableNode() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL);");
+        CommitEntry rename = commit("ALTER TABLE orders RENAME TO purchases;");
+
+        List<String> lines = diff("left", "right", List.of(create, rename), List.of(create));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- purchases",
+                "  |- > ALTER TABLE orders RENAME TO purchases;"
+        ), lines);
+    }
+
+    @Test
+    void aTableRenamedOnOneSideAndDroppedOnTheOtherIsLabeledConflicting() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL);");
+        CommitEntry rename = commit("ALTER TABLE orders RENAME TO purchases;");
+        CommitEntry drop = commit("DROP TABLE orders;");
+
+        List<String> lines = diff("left", "right", List.of(create, rename), List.of(create, drop));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- purchases (conflicting)",
+                "  |- > ALTER TABLE orders RENAME TO purchases;",
+                "  |- < DROP TABLE orders;"
+        ), lines);
+    }
+
+    /**
+     * Without SideChanges looking the shared history's table up by stable id, this used to fail: the base table's
+     * name is "orders", but the diff's (left-preferred) display name is "purchases" once one side renamed it - a
+     * lookup by name missed the base entirely, and every column read as freshly added by both sides, including
+     * col1, which only the right branch actually touched.
+     */
+    @Test
+    void aTableRenamedOnOneSideWhileTheOtherRetypesAColumnIsNotAConflict() {
+        CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));");
+        CommitEntry rename = commit("ALTER TABLE orders RENAME TO purchases;");
+        CommitEntry retype = commit("ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;");
+
+        List<String> lines = diff("left", "right", List.of(create, rename), List.of(create, retype));
+
+        assertEquals(List.of(
+                "left vs right",
+                "- purchases",
+                "  |- > ALTER TABLE orders RENAME TO purchases;",
+                "  |- col1",
+                "    |- < ALTER TABLE orders ALTER COLUMN col1 TYPE BIGINT;"
+        ), lines);
+    }
+
     private List<String> diff(String left, String right, List<CommitEntry> leftCommits, List<CommitEntry> rightCommits) {
         return formatter.format(left, right, differ.diff(leftCommits, rightCommits));
     }
