@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dbgit</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-monospace, Menlo, Consolas, monospace; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.1rem; }
+  fieldset { border: 1px solid #8888; border-radius: 6px; margin-bottom: 1rem; }
+  label { display: block; font-size: 0.8rem; opacity: 0.75; margin-top: 0.5rem; }
+  input, textarea { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 0.95rem;
+                     padding: 0.4rem; margin-top: 0.15rem; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 0.5rem; }
+  .row > div { flex: 1; }
+  button { margin-top: 0.75rem; padding: 0.5rem 1.2rem; font-family: inherit; cursor: pointer; }
+  pre#out { white-space: pre-wrap; padding: 0.75rem; border-radius: 6px; min-height: 4rem;
+             background: #8881; border: 1px solid #8888; }
+  pre#out.err { border-color: #c33; }
+  small { opacity: 0.6; }
+</style>
+</head>
+<body>
+<h1>dbgit — request / response</h1>
+<small>Every field here is exactly what the <code>DBGIT/1</code> header and the command line carry -
+nothing is remembered between requests, the same way the daemon itself keeps no per-user state.</small>
+
+<fieldset>
+<legend>Who's asking</legend>
+<div class="row">
+  <div><label>author</label><input id="author" value="webuser"></div>
+  <div><label>branch</label><input id="branch" value="main"></div>
+</div>
+</fieldset>
+
+<fieldset>
+<legend>Tracked database (only needed for <code>init</code> or commands on <code>main</code>)</legend>
+<div class="row">
+  <div><label>db-host</label><input id="db-host" value="localhost"></div>
+  <div><label>db-port</label><input id="db-port" value="5433"></div>
+  <div><label>db-database</label><input id="db-database" value="postgres"></div>
+</div>
+<div class="row">
+  <div><label>db-user</label><input id="db-user" value="postgres"></div>
+  <div><label>db-password</label><input id="db-password" type="password" value="postgres"></div>
+</div>
+</fieldset>
+
+<label>command (e.g. <code>dbgit branch</code>, <code>dbgit checkout -b feature</code>, <code>dbgit add</code>, <code>dbgit commit -m message</code>, <code>dbgit diff a b</code>)</label>
+<input id="command" value="dbgit init">
+
+<label>DDL body — only sent when the command is <code>dbgit add</code></label>
+<textarea id="body" rows="4" placeholder="CREATE TABLE orders (id INT NOT NULL);"></textarea>
+
+<button id="run">Run</button>
+
+<h3>Response</h3>
+<pre id="out"></pre>
+
+<fieldset>
+<legend>Admin</legend>
+<select id="admin-script"><option value="clear-everything">clear-everything</option></select>
+<button id="admin-run">Run script</button>
+<pre id="admin-out"></pre>
+</fieldset>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function encode(value) {
+  return encodeURIComponent(value ?? "");
+}
+
+function buildHeader() {
+  const fields = [["author", $("author").value], ["branch", $("branch").value]];
+  if ($("db-host").value.trim()) {
+    fields.push(["db-host", $("db-host").value], ["db-port", $("db-port").value || "5432"],
+      ["db-database", $("db-database").value], ["db-user", $("db-user").value],
+      ["db-password", $("db-password").value]);
+  }
+  return "DBGIT/1 " + fields.map(([k, v]) => `${k}=${encode(v)}`).join(" ");
+}
+
+async function post(path, payload, outEl) {
+  outEl.textContent = "…";
+  outEl.className = "";
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    outEl.textContent = result.lines.join("\n") || (result.ok ? "(no output)" : "(failed, no message)");
+    outEl.className = result.ok ? "" : "err";
+  } catch (error) {
+    outEl.textContent = "Could not reach the relay: " + error;
+    outEl.className = "err";
+  }
+}
+
+$("run").addEventListener("click", () => {
+  const command = $("command").value.trim();
+  const isAdd = /^dbgit\s+add(\s|$)/.test(command);
+  post("/run", { header: buildHeader(), command, body: isAdd ? $("body").value : null }, $("out"));
+});
+
+$("admin-run").addEventListener("click", () => {
+  post("/admin/run", { name: $("admin-script").value }, $("admin-out"));
+});
+</script>
+</body>
+</html>
