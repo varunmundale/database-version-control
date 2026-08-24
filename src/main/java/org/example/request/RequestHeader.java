@@ -16,10 +16,7 @@ import java.util.Map;
  * DBGIT/1 author=varun branch=feature/orders db-host=localhost db-port=5432 db-database=app db-user=varun db-password=s3cret
  * </pre>
  *
- * <p>Values are percent-encoded, because a password may contain a space or an {@code =} and this line is split on
- * both. The version prefix is mandatory: with the branch <em>and</em> the credentials now coming from the client,
- * a request without a header carries too little to act on, so guessing at defaults would only fail later and less
- * clearly.
+ * <p>Values are percent-encoded, since a password may contain a space or an {@code =} and this line is split on both.
  */
 public final class RequestHeader {
     public static final String VERSION = "DBGIT/1";

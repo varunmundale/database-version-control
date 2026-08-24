@@ -10,13 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * {@link SqlDdlParser} configured with {@link DialectGrammar#mysql()} - MySQL's one difference from Postgres/H2's
- * grammar. See {@code org.example.adapters.SqlDdlParser} for the shared CREATE TABLE/ADD|DROP|RENAME
- * COLUMN/constraint/index logic every dialect runs unchanged, already covered end-to-end via
- * {@link SqlDdlParserPostgresTest}. These sanity checks confirm that shared logic really is reachable with this
- * grammar too, not just the retype/identity spellings.
- */
+/** {@link SqlDdlParser} configured with {@link DialectGrammar#mysql()}. */
 class SqlDdlParserMySqlTest {
     private final SqlDdlParser parser = new SqlDdlParser(DialectGrammar.mysql());
 

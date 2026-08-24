@@ -18,35 +18,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Parses DDL for every SQL dialect dbgit understands, using
- * <a href="https://github.com/JSQLParser/JSqlParser">JSqlParser</a> for the actual grammar rather than hand-rolled
- * pattern matching - it already handles quoting, schema-qualified names, and each vendor's own type syntax
- * correctly. {@code CREATE TABLE} (columns only), {@code ALTER TABLE ADD|DROP|RENAME COLUMN},
- * {@code ALTER TABLE ADD|DROP CONSTRAINT} and {@code CREATE [UNIQUE] INDEX} are identical across Postgres, MySQL
- * and H2's grammars, so none of that belongs to any one vendor - this class routes each statement to whichever of
- * {@link ColumnMapper} (column definitions), {@link ConstraintMapper} (constraints, wherever declared) or
- * {@link SqlIdentifiers} (case-folding, type-name cleanup) actually owns it, rather than doing all of it itself.
- *
- * <p>The two things that genuinely differ per dialect - how a column's type change is spelled ({@code ALTER
- * COLUMN c TYPE t} for Postgres/H2, {@code MODIFY COLUMN c t} for MySQL) and what an identity/auto-increment
- * column spec looks like ({@code GENERATED ... AS IDENTITY} versus {@code AUTO_INCREMENT}) - are pure vocabulary,
- * never behavior: every dialect runs exactly the same parsing logic, just checked against different constants. So
- * rather than one subclass per dialect overriding a hook, a single {@code SqlDdlParser} is configured with a
- * {@link DialectGrammar} naming that dialect's spellings; {@link org.example.adapters.spi.DdlParserRegistry}
- * builds one instance per registered dialect.
- *
- * <p>Constraints and indexes must be declared as their own statements: a {@code CREATE TABLE} that carries a
- * constraint - whether written on a column ({@code id INT PRIMARY KEY}) or as a table-level clause
- * ({@code , PRIMARY KEY (id)}) - is rejected, rather than silently ignored as it once was. A constraint dbgit
- * cannot see is a constraint it cannot diff, merge or replay onto a forked branch. {@code NOT NULL},
- * {@code DEFAULT} and the dialect's identity/auto-increment spec are exempt: they are properties of the column
- * itself, and the model already carries them - see {@link ColumnSpecs}.
- *
- * <p>{@code IF EXISTS}/{@code IF NOT EXISTS}, on any statement, is rejected rather than honored: dbgit rebuilds a
- * schema by replaying a history, so a statement must mean the same thing every time it runs, and a conditional
- * clause means one thing on a branch that has the object and another on one that doesn't. {@code CASCADE} on a
- * {@code DROP TABLE} is rejected for the same reason from the other direction - it can silently drop constraints
- * on other tables that replay never sees and {@code dbgit diff} can never report.
+ * Parses DDL for one SQL dialect using <a href="https://github.com/JSQLParser/JSqlParser">JSqlParser</a> for the
+ * grammar, routing each statement to whichever of {@link ColumnMapper}, {@link ConstraintMapper} or
+ * {@link SqlIdentifiers} owns that piece. Per-dialect vocabulary (retype syntax, identity spec) is supplied via
+ * {@link DialectGrammar} rather than subclassing, since only the vocabulary differs across dialects, never the
+ * parsing logic. See CLAUDE.md for what's accepted and why (inline constraints, {@code IF EXISTS}, {@code CASCADE}
+ * are all rejected here rather than reaching the database).
  */
 public final class SqlDdlParser implements DdlParser {
     private static final String UNIQUE = "UNIQUE";
@@ -175,12 +152,7 @@ public final class SqlDdlParser implements DdlParser {
                 SqlIdentifiers.normalizeAll(index.getColumnsNames()));
     }
 
-    /**
-     * Reached whenever {@link DialectGrammar#isRetypeOperation} says so. The {@code USING <expr>} conversion
-     * clause Postgres allows is accepted but discarded - the internal model only needs the resulting type.
-     * {@code SET}/{@code DROP NOT NULL} and similar leave the type token empty or non-{@code USING} specs, which
-     * this rejects rather than silently misreading.
-     */
+    /** A trailing {@code USING <expr>} conversion clause is accepted and discarded; anything else unrecognized is rejected. */
     private SchemaOperation toAlterColumnType(String tableName, ColumnDefinition column, String ddl) {
         List<String> specs = column.getColumnSpecs();
         String newType = column.getColDataType() == null ? null : column.getColDataType().getDataType();

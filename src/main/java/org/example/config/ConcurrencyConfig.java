@@ -1,17 +1,10 @@
 package org.example.config;
 
 /**
- * How much work the {@code dbService} daemon does at once, and how long it is willing to wait for anything.
- *
- * <p>The whole section is optional, so a {@code dbgit.json} written before concurrency existed still boots on
- * these defaults. {@code handlerThreads} should be sized for the <em>slowest</em> command rather than the average
- * one: a cold {@code checkout -b} pulls a Docker image and polls for readiness, and it occupies its thread for the
- * whole of that.
- *
- * <p>Connections are not pooled: every query opens one and closes it again. Each in-flight mutating command holds
- * two metadata connections at once - one pinned for the command's whole life by its branch lock, one for the work
- * itself - so the metadata server needs room for roughly {@code 2 x handlerThreads} connections. PostgreSQL
- * allows 100 by default, which leaves plenty of headroom at the defaults here.
+ * How much work the {@code dbService} daemon does at once, and how long it is willing to wait for anything. The
+ * whole section is optional, defaulting a {@code dbgit.json} written before concurrency existed. Size
+ * {@code handlerThreads} for the <em>slowest</em> command, not the average - a cold {@code checkout -b} occupies
+ * its thread for as long as the Docker pull it triggers.
  */
 public final class ConcurrencyConfig {
     private static final ConcurrencyConfig INSTANCE = load();

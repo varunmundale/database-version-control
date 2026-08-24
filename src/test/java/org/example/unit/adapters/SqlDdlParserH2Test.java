@@ -9,13 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * {@link SqlDdlParser} configured with {@link DialectGrammar#h2()} - H2 accepts the same retype spelling
- * Postgres's grammar does (H2 understands {@code ALTER COLUMN ... TYPE} directly) and rejects MySQL's
- * {@code MODIFY COLUMN}, the reverse of {@link SqlDdlParserMySqlTest}. See {@code org.example.adapters.SqlDdlParser}
- * for the shared CREATE TABLE/ADD|DROP|RENAME COLUMN/constraint/index logic every dialect runs unchanged, already
- * covered end-to-end via {@link SqlDdlParserPostgresTest}.
- */
+/** {@link SqlDdlParser} configured with {@link DialectGrammar#h2()}, which accepts both identity spellings. */
 class SqlDdlParserH2Test {
     private final SqlDdlParser parser = new SqlDdlParser(DialectGrammar.h2());
 

@@ -18,10 +18,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The default {@link VersioningService}, backed by the metadata repositories in
- * {@link org.example.repository}. Owns the business rules only - how a branch's history is reconstructed from
- * the shared commit graph, and what has to move together in a commit or a merge commit - leaving every row-level
- * read and write to a repository.
+ * The default {@link VersioningService}, backed by the metadata repositories in {@link org.example.repository}.
+ * Owns the business rules only - reconstructing a branch's history, what must move together in a commit or merge
+ * commit - leaving row-level reads/writes to the repositories.
  */
 public final class MetadataVersioningService implements VersioningService {
     private final MetadataDatabase database;

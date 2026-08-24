@@ -29,20 +29,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The {@code dbService} daemon: listens on a local TCP socket, accepts connections and hands each one to the
- * bounded pool as a {@link ConnectionHandler}. Owns the accept loop, the pool and construction/wiring of the
- * command layer; framing a connection's bytes into a request and dispatching it belongs to
- * {@link ConnectionHandler}, the byte-level work of reading and writing belongs to {@link SocketReader} and
- * {@link SocketWriter}, and picking the {@link Command} for a given argument list belongs to {@link CommandFactory}.
+ * The {@code dbService} daemon: accepts TCP connections and hands each to a bounded thread pool as a
+ * {@link ConnectionHandler}, so one caller's {@code checkout -b} doesn't block everyone else behind a Docker pull.
+ * The pool is bounded rather than elastic because each command holds real database connections for its duration;
+ * a full pool answers "busy" instead of queueing without limit - size it for the slowest command, not the average.
  *
- * <p>{@link #execute} and {@link #add} are the same entry points the socket path uses, callable directly by anyone
- * embedding the daemon - which is how the command tests drive every {@code dbgit} verb without a client.
- *
- * <p>Connections are handed to a bounded pool, so one caller's {@code checkout -b} no longer blocks everyone
- * else's commands behind a Docker pull. The pool is bounded rather than elastic because each command holds real
- * database connections for its whole duration; when it and its queue are full the daemon says so, which is a
- * better answer than an unbounded backlog of clients that have already timed out. Size it for the slowest command,
- * not the average one.
+ * <p>{@link #execute} and {@link #add} are the same entry points the socket path uses, callable directly - which
+ * is how the command tests drive every {@code dbgit} verb without a client.
  */
 public final class DbGitCommandListener implements Closeable {
     private final CommandContext context;
@@ -64,14 +57,7 @@ public final class DbGitCommandListener implements Closeable {
         return new BranchLocks(new AdvisoryBranchLock(), Duration.ofMillis(concurrency.lockTimeoutMs()));
     }
 
-    /**
-     * {@link ServerSocket}'s own {@link BindException} message ("Address already in use") says nothing about why -
-     * in practice this is almost always a second {@code dbService} already running (a manual one and a systemd one
-     * left racing for the same port is the recurring case), not a genuinely unrelated process. Naming that directly,
-     * with a command to go find it, turns "read the stack trace, guess, restart in a loop" into one obvious next
-     * step - and matters more than it looks: a systemd unit with {@code Restart=on-failure} hides this failure in a
-     * crash loop rather than surfacing it once, so the clearer the one message that does get logged, the better.
-     */
+    /** A bind failure here is almost always a second {@code dbService} already running on this port. */
     private static ServerSocket bind(int port) throws IOException {
         try {
             return new ServerSocket(port);
@@ -100,10 +86,7 @@ public final class DbGitCommandListener implements Closeable {
         return serverSocket.getLocalPort();
     }
 
-    /**
-     * Blocks, accepting connections and handing each to the pool, until {@link #close()} is called. The accept
-     * thread does no work of its own beyond that, so a slow command never stops new clients being accepted.
-     */
+    /** The accept thread does no work beyond handing off to the pool, so a slow command never blocks new clients. */
     public void serve() throws IOException {
         while (!serverSocket.isClosed()) {
             Socket socket;
@@ -120,10 +103,8 @@ public final class DbGitCommandListener implements Closeable {
         }
     }
 
-    /**
-     * Stops accepting, then gives in-flight commands time to finish rather than killing them: a {@code reset}
-     * interrupted between its {@code DROP DATABASE} and its replay would leave a branch with no database at all.
-     */
+    /** Drains rather than kills: a {@code reset} interrupted between its {@code DROP DATABASE} and replay would
+     *  leave a branch with no database at all. */
     @Override
     public void close() throws IOException {
         serverSocket.close();
@@ -158,10 +139,7 @@ public final class DbGitCommandListener implements Closeable {
         return thread;
     }
 
-    /**
-     * Overflow gets an answer rather than a dropped connection or an unbounded backlog - a client that is told it
-     * was refused can retry, while one queued behind a Docker pull just times out.
-     */
+    /** A refused client can retry immediately; one silently queued behind a Docker pull would just time out. */
     private static final class RespondBusy implements RejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable task, ThreadPoolExecutor executor) {

@@ -4,11 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parses the connection flags {@code dbgit init} takes into a {@link ConnectionSettings}.
- *
- * <p>This runs in the <em>client</em>, not the daemon: the connection - password included - travels in the request
- * header now, so the client is what must understand these flags, and a typo is reported without a round trip. The
- * daemon only ever sees the parsed result.
+ * Parses the connection flags {@code dbgit init} takes into a {@link ConnectionSettings}. Runs client-side, so a
+ * typo is reported without a round trip to the daemon.
  */
 public final class ConnectionArguments {
     private ConnectionArguments() {
@@ -16,8 +13,7 @@ public final class ConnectionArguments {
 
     /**
      * Pulls the required {@code --author <name>} out of an init argument list, so the rest can be parsed as a
-     * connection by {@link #parse}. {@code --author} sets the workspace's commit identity rather than describing a
-     * database, so it never reaches {@link ConnectionSettings} - the caller persists it separately.
+     * connection by {@link #parse}.
      *
      * @param arguments mutated in place: the flag and its value are removed once found
      * @return the author name

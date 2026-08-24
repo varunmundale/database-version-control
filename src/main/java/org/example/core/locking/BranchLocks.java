@@ -7,12 +7,8 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Takes the branch locks one operation needs, all of them or none.
- *
- * <p>Multi-branch operations are why this exists rather than callers using {@link BranchLock} directly:
- * {@code merge} holds its target and its source, {@code checkout -b} holds the parent and the child. Two merges in
- * opposite directions would deadlock if each took its own branch first, so branches are always locked in
- * lexicographic order regardless of the order asked for, and released in reverse.
+ * Takes the branch locks one operation needs, all of them or none. Always locked in lexicographic order and
+ * released in reverse, so two merges in opposite directions can't deadlock each other.
  */
 public final class BranchLocks {
     private final BranchLock lock;

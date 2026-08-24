@@ -154,10 +154,7 @@ class DbGitCommandListenerTest {
         }
     }
 
-    /**
-     * If the daemon were still serial the barrier would never trip and this would time out - which is the point:
-     * it proves the handlers really do overlap, rather than merely that three requests eventually succeeded.
-     */
+    /** A serial daemon would never trip the barrier and this would time out - proving handlers really overlap. */
     @Test
     void concurrentClientsAreHandledInParallel() throws Exception {
         int clients = 3;
@@ -176,10 +173,7 @@ class DbGitCommandListenerTest {
         }
     }
 
-    /**
-     * One handler, a queue of one: the third and fourth callers cannot be served at all. They are told so, rather
-     * than being dropped or left queued behind work that has not started.
-     */
+    /** One handler, a queue of one: the third and fourth callers must be told the server is busy, not dropped. */
     @Test
     void whenEveryHandlerAndTheQueueAreFullTheRestAreToldTheServerIsBusy() throws Exception {
         CountDownLatch release = new CountDownLatch(1);
@@ -203,10 +197,7 @@ class DbGitCommandListenerTest {
         }
     }
 
-    /**
-     * The other half of the same guarantee: work on one branch is serialized, however many handlers are free. An
-     * unserialized daemon would have all three inside at once, since nothing else here blocks.
-     */
+    /** Work on one branch is serialized regardless of free handlers - an unserialized daemon would run all three at once. */
     @Test
     void addsToOneBranchAreSerializedEvenWhenHandlersAreFree() throws Exception {
         AtomicInteger inside = new AtomicInteger();

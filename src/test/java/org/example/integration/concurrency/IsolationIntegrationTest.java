@@ -14,12 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code concurrency-isolation-test.sh}: two workspaces on one daemon keep separate current branches, and work on
- * different branches proceeds at the same time rather than queueing behind each other.
- *
- * <p>The daemon used to keep the current branch in a single file in its own working directory, so one caller's
- * {@code checkout} silently moved everyone else's. Each request now carries its own branch in its header, which is
- * what this test - the one integration test here that drives two independent workspaces against the same daemon
- * rather than one - actually exercises.
+ * different branches proceeds at the same time rather than queueing behind each other. The one integration test
+ * here driving two independent workspaces against the same daemon rather than one.
  */
 class IsolationIntegrationTest extends DbGitIntegrationTest {
 

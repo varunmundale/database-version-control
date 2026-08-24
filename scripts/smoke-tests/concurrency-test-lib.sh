@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Shared helpers for the concurrency test scripts. Sourced, not run.
 #
-# These drive the real ./dbgit client against a running ./dbService, so they exercise the whole stack: the wire
-# protocol, the request header, the thread pool and the branch locks. Every branch they use is a fork in the
-# scratchpad container, never `main` itself - but `dbgit init` is still how a workspace's author is set (the only
-# way dbgit exposes one), so `new_workspace` points `main` at the same always-available scratchpad target every
-# demo script uses, purely to give each simulated caller a distinct commit identity.
+# Drives the real ./dbgit client against a running ./dbService, exercising the whole stack: wire
+# protocol, request header, thread pool and branch locks. Every branch used here is a scratchpad
+# fork, never `main` - `new_workspace` still runs `dbgit init` against the scratchpad target purely
+# to give each simulated caller its own `--author` identity.
 #
 # Requirements: ./dbService running, and Docker available for the shared PostgreSQL container.
 

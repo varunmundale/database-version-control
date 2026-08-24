@@ -124,10 +124,8 @@ class ConstraintsAndIndexesIntegrationTest extends DbGitIntegrationTest {
         assertTrue(schema.indexes(databaseOf("pricing"), "orders").contains("idx_orders_total"),
                 "the index moved with the column it covers");
 
-        // The column shows up under its old name, as one node - a rename is one column that differs, not a drop
-        // and an add. It is not labeled conflicting: only 'pricing' touched the column, so the rename is a change
-        // 'mybranch' has yet to receive rather than a disagreement. (A rename racing a modification on the other
-        // side still is one - both branches would have changed the same column.)
+        // A rename reads as one column that differs, not a drop and an add, and is not conflicting: only 'pricing'
+        // touched it, so it's a change 'mybranch' hasn't received yet, not a disagreement.
         List<String> diff = dbgit("diff", "mybranch", "pricing").out();
         assertTrue(diff.contains("  |- total"), diff.toString());
         assertFalse(diff.stream().anyMatch(line -> line.contains("(conflicting)")), diff.toString());

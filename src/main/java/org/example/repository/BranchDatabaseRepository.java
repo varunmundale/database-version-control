@@ -12,13 +12,9 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * The branches scratchpad: the one shared PostgreSQL container every branch's real database is forked into.
- * Everything dbgit does to a branch database goes through here - create it, run a statement against it, replay a
- * whole history into it, check the server is up - so no caller opens a connection to it for itself.
- *
- * <p>Sibling of the metadata repositories in this package, and the other half of the two-database split dbgit runs
- * on: {@link BranchMetadataRepository} and friends record what a branch's schema *should* be, this applies it for
- * real.
+ * The branches scratchpad: the one shared container every branch's real database is forked into. Everything dbgit
+ * does to a branch database - create it, run a statement, replay a whole history, check the server is up - goes
+ * through here.
  */
 public final class BranchDatabaseRepository {
     private final BranchDatabaseConfig config;
@@ -62,11 +58,7 @@ public final class BranchDatabaseRepository {
                 "create branch database '" + database + "'");
     }
 
-    /**
-     * Drops a branch's database if it is there, so it can be rebuilt from history - what {@code dbgit reset} does
-     * before replaying. Postgres refuses while anything else is connected to it, which surfaces as a
-     * {@link RepositoryException} rather than a silently half-reset branch.
-     */
+    /** Drops a branch's database if it is there, so it can be rebuilt from history. */
     public void dropDatabase(String database) {
         execute(config.connectionTo(adminDatabase()), "DROP DATABASE IF EXISTS \"" + database + "\"",
                 "drop branch database '" + database + "'");
@@ -83,11 +75,8 @@ public final class BranchDatabaseRepository {
     }
 
     /**
-     * Replays a history into a branch's database over a single connection, in order, as one transaction: a branch
-     * database is either the schema its whole history describes or untouched, never a partial build nobody can
-     * name. This is {@link SqlConnector#transaction}'s job on this side of the two-database split, the way
-     * {@code MetadataDatabase.transaction} is jOOQ's on the metadata side - PostgreSQL runs DDL transactionally,
-     * so a failing statement takes every statement before it back out with it.
+     * Replays a history into a branch's database as one transaction, so a failing statement rolls back every
+     * statement before it rather than leaving a partially built schema.
      */
     public void replay(String database, List<ChangeSet> changesets) {
         replay(config.connectionTo(database), changesets);

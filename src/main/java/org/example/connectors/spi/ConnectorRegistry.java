@@ -37,11 +37,6 @@ public final class ConnectorRegistry {
         return settings -> registered.connector().apply(registered.connections().open(settings));
     }
 
-    /** The raw connection opener, for callers handing connections to another library rather than to a {@link SqlConnector}. */
-    public JdbcConnections connections(String dialect) {
-        return dialect(dialect).connections();
-    }
-
     public static ConnectorRegistry builtins() {
         return new ConnectorRegistry()
                 .register("postgresql", PostgresConnections.INSTANCE, PostgresConnector::new)

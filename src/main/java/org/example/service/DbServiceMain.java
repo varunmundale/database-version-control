@@ -7,11 +7,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 
 /**
- * Standalone entry point for the {@code dbService} daemon: stays running and serves {@code dbgit} clients.
- *
- * <p>Deliberately captures no working directory. The daemon holds no per-user state - which branch a caller is on,
- * and how to reach the database {@code main} tracks, both arrive on each request - so it serves every workspace
- * equally rather than the one it happened to be started in.
+ * Entry point for the {@code dbService} daemon. Captures no working directory: the daemon holds no per-user
+ * state, since branch and credentials arrive on each request instead.
  */
 public final class DbServiceMain {
     private static final Logger LOG = LoggerFactory.getLogger(DbServiceMain.class);
@@ -22,9 +19,7 @@ public final class DbServiceMain {
         try {
             listener = new DbGitCommandListener(port);
         } catch (IOException exception) {
-            // Logged here, not left to whatever prints the propagating exception: 'mvn exec:java' wraps it in its
-            // own MojoExecutionException noise, and a systemd unit with Restart=on-failure would otherwise hide it
-            // in a crash loop instead of saying once, clearly, why this attempt failed.
+            // Logged here rather than left to 'mvn exec:java's noisier wrapper exception.
             LOG.error("Could not start dbService: {}", exception.getMessage());
             throw exception;
         }

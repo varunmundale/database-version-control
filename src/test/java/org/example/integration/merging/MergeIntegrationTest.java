@@ -11,15 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The two merge walkthroughs, {@code merge-demo-non-conflicting.sh} and {@code merge-demo-conflicting.sh}: two
- * branches forked from the same commit, one pair touching different columns and one pair touching the same column
- * incompatibly.
- *
- * <p>A merge is the operation with the most to go wrong outside the metadata store - it forks a staging branch,
- * replays the other side's changesets into that database, replays them again into the target's own database, and
- * only then records a two-parent commit - so these tests check the databases as much as the output: that the
- * target really gained the other branch's columns, and that a rejected merge left no database, no branch and no
- * commit behind.
+ * Merges between branches forked from the same commit - clean, conflicting, and every way of resolving a conflict.
+ * Checks the real databases as much as the output, since a merge forks a staging branch, replays into it, then
+ * replays again into the target - so a rejected merge should leave no trace in either database.
  */
 class MergeIntegrationTest extends DbGitIntegrationTest {
 
@@ -229,12 +223,9 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
     }
 
     /**
-     * Once {@code mb1} has been merged into {@code mb}, {@code mb}'s flattened history holds mb1's contributed
-     * changeset (the {@code sku} column) *after* mb's own unique commit ({@code owner}) - the second parent's
-     * content sorts after the first parent's own. Merging back the other way, {@code mb} into {@code mb1}, used to
-     * compare the two branches' flattened histories position by position, so it never got far enough past mb's own
-     * commit to see that the {@code sku} commit was shared, and replayed it a second time - failing with "column
-     * already exists" even though the only genuinely new thing to bring in is {@code owner}.
+     * Regression test: comparing flattened histories position-by-position (rather than by commit id) used to make
+     * merging back the other way replay an already-shared commit a second time and fail with "column already
+     * exists," even though only one commit was genuinely new.
      */
     @Test
     void mergingBackTheOtherWayAfterAPriorMergeOnlyBringsInTheGenuinelyNewColumn() {
@@ -264,14 +255,9 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
     }
 
     /**
-     * Resolving a conflict the other way round: instead of adding a compensating statement, the branch resets away
-     * its own conflicting commit. Once it has, only the other branch has touched the column, so there is nothing
-     * left to disagree about and the merge simply brings that change in.
-     *
-     * <p>This used to fail. A conflict was decided by comparing the two branches' schemas alone, so a column that
-     * read {@code VARCHAR(20)} on one side and {@code VARCHAR(10)} on the other was called a conflict no matter
-     * which of them had changed it - and the reset, which had put the column back exactly as the shared history
-     * left it, changed nothing about that answer.
+     * Resolving a conflict by resetting away the conflicting commit instead of compensating. Regression test:
+     * comparing only the two branches' schemas (not the shared history) used to call this a conflict regardless of
+     * which side had changed it, so the reset changed nothing about the answer.
      */
     @Test
     void resettingAwayTheConflictingCommitLetsTheMergeThroughAndBringsInTheOtherBranchsChange() {
@@ -314,14 +300,9 @@ class MergeIntegrationTest extends DbGitIntegrationTest {
     }
 
     /**
-     * The other way of resolving the same conflict as the reset above: 'other' compensates, retyping the column
-     * back to what the shared history declared - and writes the type in the case it feels like, since a type is
-     * keywords rather than data. Once it has, only 'current' has moved the column, so the merge goes through and
-     * brings 'current's type in.
-     *
-     * <p>This used to be refused. The compensating {@code varchar(100)} was compared as a string against the
-     * {@code VARCHAR(100)} the {@code CREATE TABLE} recorded, so 'other' still counted as having changed the
-     * column and the conflict outlived the statement written to resolve it.
+     * The other way of resolving the same conflict: 'other' compensates back to the shared type, written in a
+     * different case. Regression test: comparing the type case-sensitively used to keep 'other' counted as having
+     * changed the column, so the conflict outlived the statement meant to resolve it.
      */
     @Test
     void compensatingBackToTheSharedTypeResolvesTheConflictWhateverCaseTheTypeIsWrittenIn() {

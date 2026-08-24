@@ -68,11 +68,7 @@ class DifferTest {
         ), lines);
     }
 
-    /**
-     * Only the right branch retyped the column; the left carries it exactly as the shared commit left it. The two
-     * schemas disagree, but nobody has to choose - which is what separates a merge that can proceed from one that
-     * cannot, and what comparing the two sides alone got wrong.
-     */
+    /** Only one side moved the column, so it's a difference to bring in, not a conflict to choose between. */
     @Test
     void aColumnOnlyOneSideModifiedIsReportedButNotLabeledAsAConflict() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
@@ -107,12 +103,7 @@ class DifferTest {
         ), lines);
     }
 
-    /**
-     * The left branch retyped the column and then retyped it back - a compensating statement settling a conflict.
-     * It has run two statements against the column and changed nothing, so the node is the right branch's alone:
-     * listing the pair under a difference the left branch is not responsible for reads as though it still were.
-     * (The undo is written in lower case, which is the same definition - a type is keywords, not data.)
-     */
+    /** A side that retypes a column and retypes it back changed nothing, so it owns none of the resulting node. */
     @Test
     void aSideThatUndidItsOwnChangeContributesNoStatementsToTheNode() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
@@ -184,11 +175,7 @@ class DifferTest {
         ), lines);
     }
 
-    /**
-     * A column added and dropped again on one side nets out to no schema difference at all, even though a
-     * changeset did touch the table post-divergence - so no {@code "- orders"} node should appear, not even an
-     * empty one.
-     */
+    /** A column added and dropped again nets to no difference, so the table gets no node at all - not even empty. */
     @Test
     void aTableTouchedPostDivergenceButNettingToNoDifferenceGetsNoNodeAtAll() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL);");
@@ -319,12 +306,7 @@ class DifferTest {
         ), lines);
     }
 
-    /**
-     * Without SideChanges looking the shared history's table up by stable id, this used to fail: the base table's
-     * name is "orders", but the diff's (left-preferred) display name is "purchases" once one side renamed it - a
-     * lookup by name missed the base entirely, and every column read as freshly added by both sides, including
-     * col1, which only the right branch actually touched.
-     */
+    /** Regression guard: matching the shared base table by name instead of stable id missed it once renamed. */
     @Test
     void aTableRenamedOnOneSideWhileTheOtherRetypesAColumnIsNotAConflict() {
         CommitEntry create = commit("CREATE TABLE orders (id INT NOT NULL, col1 NUMERIC(10,2));");
@@ -350,8 +332,7 @@ class DifferTest {
         return new ChangeSet(changesetIdSequence++, "test", ddl, ChangesetStatus.COMMIT, Instant.now());
     }
 
-    /** One commit carrying a single changeset - fine-grained enough that reusing the same {@link CommitEntry}
-     * instance on both sides is exactly "this commit is shared", matching the old prefix-based tests' granularity. */
+    /** One commit per changeset, so reusing the same {@link CommitEntry} on both sides means "this is shared". */
     private CommitEntry commit(ChangeSet changeset) {
         return new CommitEntry(new Commit(commitIdSequence++, "test", null, Instant.now(), null), List.of(changeset));
     }

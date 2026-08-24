@@ -12,8 +12,7 @@ import java.util.Set;
 
 /**
  * The shared commit DAG - every commit ever created, across every branch - keyed by id, plus the traversals that
- * turn a HEAD commit id into a branch's own history. Every edge here points from a commit to its parent(s), so a
- * branch's ancestry is exactly the sub-DAG reachable by walking those edges from its HEAD.
+ * turn a HEAD commit id into a branch's own history by walking parent edges.
  */
 public final class CommitGraph {
     private final Map<Long, Commit> commitsById;
@@ -23,12 +22,9 @@ public final class CommitGraph {
     }
 
     /**
-     * The topological order of the sub-DAG reachable from {@code headCommitId} - every parent before every child,
-     * root first - which is exactly the order a branch's schema was actually built up in: the first parent's full
-     * history, then anything reachable only through the second parent (a merge commit's contribution), then the
-     * commit itself, mirroring how a merge commit physically replayed the second branch's diverged changesets on
-     * top of the first's. A node reachable through both parents (a common ancestor) is visited once, at the
-     * position it is first reached.
+     * Root-first topological order of the sub-DAG reachable from {@code headCommitId}: a branch's schema was built
+     * up as the first parent's full history, then anything reachable only through a merge commit's second parent,
+     * then the commit itself. A common ancestor reachable through both parents is visited once.
      */
     public List<Long> topologicalOrder(Long headCommitId) {
         List<Long> order = new ArrayList<>();

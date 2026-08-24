@@ -7,14 +7,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Renders a {@link HistoryDiff} as the tree {@code dbgit diff} prints. Purely presentation: it computes nothing
- * and reads no history - {@link Differ} has already worked out which tables differ, which columns, constraints and
- * indexes within them, and which statements each side ran against each of those. This class only decides what that
- * looks like on a terminal: a node per table, a node per object under it marked {@code (conflicting)} when the
- * diff says both branches changed it since they diverged, and beneath it every statement, marked {@code >} for the
- * left branch or {@code <} for the right - which is what brings both sides of a conflict together without needing
- * a second rendering for it. A table itself is a node the same way, marked {@code (conflicting)} when both sides
- * created, dropped or renamed it since they diverged, with its own statements nested directly underneath.
+ * Renders a {@link HistoryDiff} as the tree {@code dbgit diff} prints - purely presentation, computing nothing
+ * itself. A node per table, a node per differing object under it marked {@code (conflicting)} when both branches
+ * changed it, and beneath that every statement, {@code >} for left or {@code <} for right.
  *
  * <pre>
  * left vs right
@@ -27,17 +22,11 @@ import java.util.List;
  *   |- &lt; DROP TABLE scratch;
  * </pre>
  *
- * <p>A table present on only one side - created or dropped, not merely renamed - prints just that statement: every
- * column, constraint and index it carried went with it, which the statement already says, so listing each of them
- * again underneath would say nothing new.
+ * <p>A table present on only one side prints just that statement - everything it carried went with it.
  */
 public final class HistoryDiffFormatter {
 
-    /**
-     * One line per tree node; empty when the two histories don't diverge at all. A diff that diverged but nets out
-     * to the same schema - a column added and dropped again on one side - is the header alone, since no table,
-     * column, constraint or index has anything to report.
-     */
+    /** One line per tree node; empty when the two histories don't diverge at all. */
     public List<String> format(String left, String right, HistoryDiff diff) {
         if (diff.isEmpty()) {
             return List.of();
@@ -53,7 +42,7 @@ public final class HistoryDiffFormatter {
         appendStatements(lines, "  |- ", ">", diff.leftStatements(tableDiff.id()));
         appendStatements(lines, "  |- ", "<", diff.rightStatements(tableDiff.id()));
         if (tableDiff.side() != Side.BOTH) {
-            return; // created or dropped, not merely renamed - the statement above already accounts for everything it carried
+            return; // created or dropped - the statement above already accounts for everything it carried
         }
         for (ColumnDiff columnDiff : tableDiff.columnDiffs()) {
             appendNode(lines, columnDiff.columnName(), columnDiff.id(), diff);
@@ -67,10 +56,7 @@ public final class HistoryDiffFormatter {
         }
     }
 
-    /**
-     * One node of the tree, with every statement each side ran against that object nested underneath it. Columns,
-     * constraints and indexes all key off a stable id, so one lookup serves all three.
-     */
+    /** One node of the tree, with every statement each side ran against that object nested underneath it. */
     private static void appendNode(List<String> lines, String label, StableId id, HistoryDiff diff) {
         lines.add("  |- " + label + (diff.isConflicting(id) ? " (conflicting)" : ""));
         appendStatements(lines, "    |- ", ">", diff.leftStatements(id));

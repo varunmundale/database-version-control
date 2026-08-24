@@ -10,11 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
- * Reads one client's request off a socket a piece at a time, the way {@link java.util.Scanner} does: the caller
- * decides what it needs next and asks for it, rather than being handed the whole request up front. That matters
- * here because only {@code dbgit add} has a body to read, and only its handler knows that.
- *
- * <p>Owns the stream and the charset, so {@link DbGitCommandListener} never touches either.
+ * Reads one client's request off a socket a piece at a time, the way {@link java.util.Scanner} does - the caller
+ * asks for what it needs next, since only {@code dbgit add}'s handler knows there's a body to read.
  */
 public final class SocketReader implements Closeable {
     private final BufferedReader reader;

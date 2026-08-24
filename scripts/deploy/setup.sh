@@ -1,32 +1,19 @@
 #!/usr/bin/env bash
-# Boots dbgit end to end, with zero required configuration: installs Docker if it isn't already
-# there, brings up a metadata Postgres on :5432, a "production" Postgres on :5433 (what `main`
-# tracks) and the branch-databases scratchpad Postgres on :55432 (what every other branch forks
-# into) - reusing whatever is already listening on those ports rather than colliding with it, so
-# this is safe to run on a machine that already has its own Postgres there - installs a JDK, builds
-# the project, and installs two systemd services: dbService (the daemon) and the HTTP relay in front
-# of it. Runs directly out of the directory it lives in; see bootstrap.sh for getting that directory
-# onto a fresh machine via git in the first place.
+# Boots dbgit end to end, with zero required configuration: installs Docker if needed, brings up a
+# metadata Postgres on :5432, a "production" Postgres on :5433 (what `main` tracks) and the
+# branch-databases scratchpad on :55432 (what every other branch forks into) - reusing whatever is
+# already listening on those ports rather than colliding with it - installs a JDK, builds the
+# project, and installs two systemd services: dbService and the HTTP relay in front of it. Runs
+# directly out of the directory it lives in; see bootstrap.sh for getting that directory onto a
+# fresh machine via git in the first place.
 #
-# The scratchpad container is provisioned here rather than left entirely to Forker/SharedContainer's
-# lazy first-fork startup (still the mechanism this uses under the hood - see ensure_postgres, which
-# is the same "reuse what's running, else start what exists, else create fresh" dance either way): a
-# machine that has ever run `docker context use` away from the daemon socket `sudo docker` resolves
-# to - Docker Desktop being the common case - would otherwise have the daemon's own later `docker run`
-# call (unprivileged, using whatever context is "current" for whichever user runs it) silently target
-# a *different* Docker than the one this script just used, so the very first fork fails to find a
-# scratchpad container that was never actually missing - it's just in a daemon nothing else is using.
-# Provisioning it here, via the same `sudo docker` every other container in this script uses, removes
-# that race entirely for the deployment this script sets up. (On a machine where Docker Desktop is
-# what you actually want dbgit to use, don't install a second system dockerd at all - point this
-# script's `docker` resolution at Desktop yourself before running it, e.g. by not having docker.io
-# installed and instead giving the invoking user's own `docker` context precedence; this script always
-# runs container commands via `sudo docker`, which follows root's own context, not the invoking user's.)
+# The scratchpad container is provisioned here (via `sudo docker`, same as every other container
+# below) rather than left to the daemon's own lazy first-fork startup, so that a machine where
+# `docker context use` points user-level `docker` somewhere other than root's default doesn't have
+# the daemon's later unprivileged `docker run` silently miss the container this script just made.
 #
-# Deliberately does NOT write dbgit.json: the version already checked into the repo
-# (src/main/resources/dbgit.json) already points at exactly localhost:5432/postgres:postgres for the
-# metadata store, localhost:55432 for the scratchpad and the postgresql dialect for branch databases.
-# Nothing here needs to be templated, so nothing is required as input.
+# Deliberately does NOT write dbgit.json: the checked-in src/main/resources/dbgit.json already
+# points at these same defaults, so nothing here needs to be templated.
 #
 #   ./scripts/deploy/setup.sh              # everything, from a clean machine or this one
 #   ./scripts/deploy/setup.sh clean        # tears down every container/service/file this script made
@@ -41,8 +28,7 @@ META_CONTAINER="${META_CONTAINER:-dbgit-metadata}"
 META_PORT="${META_PORT:-5432}"
 PROD_CONTAINER="${PROD_CONTAINER:-dbgit-production-db}"
 PROD_PORT="${PROD_PORT:-5433}"
-# Must match branchDatabases.containerName/hostPort in src/main/resources/dbgit.json - not overridable
-# the way the other two are, since dbgit.json is checked in unchanged and isn't templated by this script.
+# Must match branchDatabases.containerName/hostPort in the checked-in dbgit.json - not overridable.
 BRANCH_CONTAINER="postgres-branches-scratchpad"
 BRANCH_PORT="55432"
 PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
@@ -54,9 +40,8 @@ port_is_listening() {
     (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3>&- 3<&-
 }
 
-# Idempotent: reuses whatever already answers on $port (this machine's own Postgres, or a container
-# from a previous run of this script), starts a stopped container of the same name, or creates one
-# fresh - in that order, so re-running this never fights something already there for the port.
+# Idempotent: reuses whatever already answers on $port, starts a stopped container of the same
+# name, or creates one fresh - in that order.
 ensure_postgres() {
     local name="$1" port="$2"
     if port_is_listening "$port"; then
@@ -190,12 +175,11 @@ WantedBy=multi-user.target
 UNIT
 
 sudo systemctl daemon-reload
-# dbgit-daemon is enabled for boot but deliberately not started/restarted here - starting the relay
-# is what starts (or restarts) it, via relay.py's own restart_daemon() on every launch. One trigger,
-# one place, instead of setup.sh and relay.py racing to both manage the same service.
+# dbgit-daemon is enabled for boot but not started here - starting/restarting the relay is what
+# (re)starts it, via relay.py's own restart_daemon() on every launch.
 sudo systemctl enable dbgit-daemon.service
 sudo systemctl enable --now dbgit-relay.service
-sudo systemctl restart dbgit-relay.service   # guarantees a fresh relay + a freshly (re)started daemon, even on redeploy
+sudo systemctl restart dbgit-relay.service   # guarantees a fresh relay + a freshly (re)started daemon
 
 echo -n "waiting for dbService to accept connections on :$SERVICE_PORT"
 for _ in $(seq 1 60); do
@@ -203,13 +187,11 @@ for _ in $(seq 1 60); do
     echo -n "."
     sleep 1
 done
-# A cold ~/.m2 means dbService's own first launch (mvn exec:java resolving exec-maven-plugin, not
-# just compiling) can take a while - up to a minute here, once, ever. Not fatal if it is still not up:
-# the dbgit init call below simply fails harmlessly and can be re-run once it catches up.
+# A cold ~/.m2 can make dbService's first launch take up to a minute; not fatal if it's still not up
+# below, since dbgit init just fails harmlessly and can be re-run once it catches up.
 
-# main has to track something before any command that touches it will work - point it at the
-# production database this script just brought up, so a fresh deploy is immediately usable rather
-# than erroring on step one. Idempotent: dbgit init just refreshes the connection if run again.
+# Point main at the production database this script just brought up, so a fresh deploy is usable
+# immediately. Idempotent: dbgit init just refreshes the connection if run again.
 if ! "$INSTALL_DIR/dbgit" init --host localhost --port "$PROD_PORT" --database postgres \
         --user postgres --password postgres --author "setup" >/dev/null 2>&1; then
     echo "note: 'dbgit init' didn't go through yet (daemon still warming up) - run it yourself once" >&2

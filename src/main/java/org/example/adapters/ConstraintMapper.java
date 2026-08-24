@@ -9,10 +9,8 @@ import org.example.models.schema.ConstraintType;
 import java.util.List;
 
 /**
- * Maps a constraint wherever JSqlParser found one declared - as its own {@code ALTER TABLE ADD CONSTRAINT}
- * statement, or (rejected) inline in a {@code CREATE TABLE}'s column or table-level clauses - to a
- * {@link SchemaOperation.AddConstraint}. A constraint dbgit cannot see is a constraint it cannot diff, merge or
- * replay onto a forked branch, which is why the inline forms are rejected rather than silently ignored.
+ * Maps a constraint declared as its own {@code ALTER TABLE ADD CONSTRAINT} statement to a
+ * {@link SchemaOperation.AddConstraint}, and rejects one declared inline in a {@code CREATE TABLE}.
  */
 final class ConstraintMapper {
     private static final String PRIMARY_KEY = "PRIMARY KEY";
@@ -32,10 +30,7 @@ final class ConstraintMapper {
                 + "_pkey PRIMARY KEY (<column>), or CREATE INDEX <name> ON " + tableName + " (<column>).");
     }
 
-    /**
-     * The constraint's type is settled first: an unsupported one (a {@code CHECK}, say) must be rejected before
-     * anything tries to read the columns it covers, which JSqlParser does not populate for those.
-     */
+    /** Rejects an unsupported constraint type before reading the columns it covers, which JSqlParser leaves empty for those. */
     SchemaOperation.AddConstraint toAddConstraint(String tableName, Index constraint, String ddl) {
         ConstraintType type = constraint instanceof ForeignKeyIndex
                 ? ConstraintType.FOREIGN_KEY

@@ -16,17 +16,10 @@ import java.util.Objects;
 import java.util.zip.CRC32;
 
 /**
- * Serializes branches through the metadata store's own PostgreSQL advisory locks, so the guarantee holds across
- * daemon processes rather than only within one JVM.
- *
- * <p>Deliberately a <em>session</em> lock on a connection of its own, not {@code pg_advisory_xact_lock} inside the
- * metadata transaction: the operations being protected run irreversible side effects - live DDL, {@code CREATE}
- * and {@code DROP DATABASE}, {@code docker} - after their metadata transaction has committed, and a
- * transaction-scoped lock is gone by then. The cost is one connection held per in-flight mutating command, which
- * is why {@code pools.metadata.maxSize} must be at least twice the daemon's thread count.
- *
- * <p>The connection is closed when the lease is released, which also drops the lock - so a handler that dies
- * without unlocking still frees the branch as soon as its connection goes.
+ * Serializes branches via PostgreSQL advisory locks, so the guarantee holds across daemon processes, not just one
+ * JVM. Deliberately a session lock on its own connection rather than {@code pg_advisory_xact_lock} inside the
+ * metadata transaction, since the protected side effects (live DDL, {@code docker}) run after that transaction
+ * commits. Closing the connection drops the lock too, so a dying handler still frees the branch.
  */
 public final class AdvisoryBranchLock implements BranchLock {
     /** Keeps dbgit's keys from colliding with any other application's advisory locks on the same server. */

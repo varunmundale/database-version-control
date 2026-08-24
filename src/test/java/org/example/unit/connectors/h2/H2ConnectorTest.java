@@ -69,12 +69,7 @@ class H2ConnectorTest {
         }
     }
 
-    /**
-     * H2 has no {@code CREATE DATABASE} statement of its own; {@link BranchDatabaseRepository#createDatabase} sends
-     * it anyway, since it is written once against whatever dialect is configured. The connector translates it into
-     * emptying the named database rather than letting H2 reject it - so this is a genuine, in-process alternative to
-     * a real branch-forked Postgres database, not just a test double.
-     */
+    /** H2 has no {@code CREATE DATABASE} of its own; the connector translates it into emptying the named database. */
     @Test
     void executingCreateDatabaseEmptiesTheNamedDatabaseInsteadOfBeingSentToH2Literally() throws SQLException {
         try (H2Connector admin = H2Connector.inMemory("connector_test_create_admin")) {

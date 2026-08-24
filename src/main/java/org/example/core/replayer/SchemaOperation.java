@@ -7,20 +7,11 @@ import java.util.List;
 
 /**
  * A single DDL statement's meaning, extracted from vendor-specific syntax by a {@link org.example.adapters.DdlParser}
- * into a shape {@link SchemaOperationApplier} can apply without knowing anything about that syntax. This is the
- * seam between "understanding what a statement says" (per vendor) and "changing the model accordingly" (shared).
- *
- * <p>These are plain data, deliberately: they carry what the statement said and nothing about what it does to a
- * table. Names, not stable ids, are what a statement mentions, so names are what these hold - resolving them is
- * the applier's job. Keeping the whole vocabulary in one file is also the point, since it is exactly the set of
- * DDL {@code dbgit add} accepts, and {@code sealed} is what makes the compiler enforce that the applier covers it.
+ * into a shape {@link SchemaOperationApplier} can apply without knowing that syntax. Plain data holding names (not
+ * stable ids); {@code sealed} so the applier's switch must cover every variant.
  */
 public sealed interface SchemaOperation {
-    /**
-     * The table this operation creates or targets - for {@link DropTable} and {@link RenameTable}, the name the
-     * table has <em>before</em> the statement runs, which is what {@link Replayer} looks the current
-     * {@link org.example.models.schema.TableModel} up by.
-     */
+    /** For {@link DropTable}/{@link RenameTable}, the table's name <em>before</em> the statement runs. */
     String tableName();
 
     record CreateTable(String tableName, List<ColumnModel> columns) implements SchemaOperation {

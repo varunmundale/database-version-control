@@ -11,13 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-/**
- * What {@link SharedContainer} looks up per dialect to build its {@code docker run} command. Uses the real,
- * shared {@link BranchDatabaseConfig#getInstance()} purely as a source of arbitrary user/password/adminDatabase
- * strings to format - {@code envArgs} doesn't know or care what dialect the config it's handed actually claims to
- * be, so this is exactly as valid a way to verify the mysql entry's env-var names as a mysql-flavored config would
- * be, without needing one (which would collide with ForkerTest/DbGitCommandsTest - see dbgit.json's own comment).
- */
+/** What {@code SharedContainer} looks up per dialect to build its {@code docker run} command. */
 class ContainerSpecTest {
     private static final BranchDatabaseConfig CONFIG = BranchDatabaseConfig.getInstance();
     private static final Map<String, ContainerSpec> SPECS = ContainerSpec.builtins();

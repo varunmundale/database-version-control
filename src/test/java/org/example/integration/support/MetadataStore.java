@@ -13,20 +13,11 @@ import java.sql.Statement;
 import java.util.List;
 
 /**
- * The real metadata store the integration tests run against: a throwaway PostgreSQL container, standing in for the
- * always-on server {@code dbgit.json}'s {@code metadata} section describes.
- *
- * <p>PostgreSQL rather than H2 because this half of dbgit is PostgreSQL by definition - {@code MetadataDatabase}
- * fixes jOOQ to the Postgres dialect, {@code metadata-schema.sql} is Postgres DDL down to {@code BIGSERIAL} and
- * {@code TIMESTAMPTZ}, and {@code AdvisoryBranchLock} serializes branches through {@code pg_try_advisory_lock}.
- * The branch databases are the half that can be swapped for H2 - see {@code ConnectorRegistry.builtins().get("h2")}
- * in {@link DbGitIntegrationTest}, and {@link org.example.connectors.h2.H2Connector} for what makes it real.
- *
- * <p>The container binds a <em>fixed</em> host port, the one the test classpath's {@code dbgit.json} names.
- * {@link MetadataStoreConfig} is a static singleton read once, long before any container could start, so the
- * container has to follow the configuration rather than the other way round. That is also why there is one
- * container for the whole JVM: the singletons behind it - {@link MetadataDatabase} included - can only ever be
- * pointed at one server.
+ * The real metadata store the integration tests run against: a throwaway PostgreSQL container standing in for the
+ * always-on server {@code dbgit.json}'s {@code metadata} section describes - PostgreSQL, not H2, because
+ * {@code MetadataDatabase}/{@code AdvisoryBranchLock} require it regardless of what dialect branch databases use.
+ * Binds the <em>fixed</em> port the test classpath's {@code dbgit.json} names, since {@link MetadataStoreConfig}
+ * is a singleton read once before any container could start - one container for the whole JVM as a result.
  */
 public final class MetadataStore {
     private static final MetadataStoreConfig CONFIG = MetadataStoreConfig.getInstance();
@@ -66,11 +57,8 @@ public final class MetadataStore {
     }
 
     /**
-     * Empties the metadata store between tests, restoring the one row {@code metadata-schema.sql} seeds it with.
-     *
-     * <p>Restarting the identity sequences is the point as much as the emptying is: branches, commits and
-     * changesets are numbered from 1 again, so a test can assert on {@code commit #1} rather than on whatever
-     * number the tests before it happened to leave behind.
+     * Empties the metadata store between tests and restarts its identity sequences, so a test can assert on
+     * {@code commit #1} rather than on whatever number the tests before it left behind.
      */
     public static void reset() {
         try (Connection connection = PostgresConnections.INSTANCE.open(CONFIG.connectionTo(CONFIG.database()));

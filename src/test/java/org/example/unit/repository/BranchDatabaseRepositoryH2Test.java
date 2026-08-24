@@ -19,19 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link BranchDatabaseRepository} built over {@code ConnectorRegistry.builtins().get("h2")} - the same lookup
- * {@code BranchDatabaseRepository.getInstance()} does for whatever {@code branchDatabases.dialect} says in
- * {@code dbgit.json}. Proves {@code dialect: "h2"} is a genuine, working alternative for a branch's (or {@code
- * main}'s tracked) database, not just something {@code DbGitIntegrationTest}'s own H2 test double simulates:
- * {@code createDatabase}/{@code dropDatabase} translate to emptying an in-memory H2 database (H2 has no
- * {@code CREATE}/{@code DROP DATABASE} of its own - see {@link org.example.connectors.h2.H2Connector}), and
- * {@code replay} runs real DDL against it exactly as it would against Postgres.
- *
- * <p>Deliberately does not flip the shared, statically-loaded {@code BranchDatabaseConfig.getInstance().dialect()}
- * to {@code "h2"}: that config is also read for real by {@code ForkerTest}/{@code DbGitCommandsTest}, which assert
- * on the real shared-Postgres-container behaviour. Handing {@code BranchDatabaseRepository} the H2 connector
- * factory directly, the way {@code getInstance()} would if the dialect said so, exercises the identical production
- * code path without disturbing that shared singleton.
+ * {@link BranchDatabaseRepository} built over the real {@code "h2"} connector factory - proof {@code dialect: "h2"}
+ * genuinely works, not just something a test double simulates. Passes the factory directly rather than flipping the
+ * shared {@code BranchDatabaseConfig} singleton, which other tests (e.g. {@code ForkerTest}) read for real.
  */
 class BranchDatabaseRepositoryH2Test {
     private static final BranchDatabaseConfig CONFIG = BranchDatabaseConfig.getInstance();

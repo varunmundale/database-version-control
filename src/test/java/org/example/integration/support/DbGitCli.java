@@ -16,16 +16,10 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 
 /**
- * One user at a {@code dbgit} prompt: a real {@link ClientWorkspace} in a directory of its own, talking to the
- * daemon over a real socket through the real {@link DbGitClient}. This is what the {@code ./dbgit} wrapper in the
- * demo scripts is, so a test written against it reads as the script does.
- *
- * <p>It mirrors {@code org.example.client.Main}'s glue rather than calling it, for one reason: {@code Main} prints
- * to {@code System.out}, and the daemon under test shares this JVM and prints its own progress there too, so
- * capturing that stream would mix a {@code Forker}'s chatter into the command's output. {@link DbGitClient} takes
- * its streams as arguments, so passing them in keeps each command's output exactly its own. The glue being
- * mirrored is the part that matters to a test: the workspace's {@code HEAD} and its {@code config.json} move only
- * once the daemon has accepted the command.
+ * One user at a {@code dbgit} prompt: a real {@link ClientWorkspace} talking to the daemon over a real socket
+ * through the real {@link DbGitClient}. Mirrors {@code org.example.client.Main}'s glue rather than calling it,
+ * because {@code Main} prints to {@code System.out}, which the in-process daemon under test also writes to -
+ * {@link DbGitClient} takes its streams as arguments instead, so each command's captured output stays its own.
  */
 public final class DbGitCli {
     private final ClientWorkspace workspace;

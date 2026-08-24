@@ -2,19 +2,10 @@
 # Demo walkthrough of RESOLVING a conflicting dbgit merge via a compensating DDL statement.
 # Requires ./dbService to already be running.
 #
-# Story:
-#   - main: creates the base 'invoices' table, commits
-#   - num: forked from main, retypes 'amount' to NUMERIC(14,4), commits
-#   - big: forked from main, retypes the SAME 'amount' column to BIGINT, commits
-#   - dbgit merge big (while on num) -> rejected: both sides touched the same column
-#     incompatibly since they diverged.
-#   - Resolution: dbgit has no automatic conflict resolution, so the way past a genuine
-#     conflict is the same as staging any other change - add a compensating DDL statement
-#     with 'dbgit add' + 'dbgit commit' that makes the two branches agree again on the
-#     conflicting column, then retry the merge. Here the compensation lands on 'num' itself,
-#     retyping 'amount' to the same BIGINT type 'big' already settled on.
-#   - dbgit merge big (while on num) -> succeeds this time, since the conflict check no
-#     longer finds a difference to flag.
+# Story: 'num' and 'big' both fork from main and retype the same column incompatibly, so merging
+# one into the other is rejected. dbgit has no automatic conflict resolution - the fix is to stage a
+# compensating statement (here, retyping 'num's column to match 'big's) so the branches agree again,
+# then retry the merge.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

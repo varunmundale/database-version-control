@@ -7,13 +7,8 @@ import java.util.Optional;
 
 /**
  * The author to attribute this request's work to, which branch they are on, and how to reach the database
- * {@code main} tracks - everything the daemon used to read from its own working directory and now receives per
- * request instead.
- *
- * <p>That inversion is what makes the daemon multi-user. {@code .dbgit/HEAD} was a single file in the daemon's
- * process directory, so every client shared one checked-out branch; now each workspace keeps its own and says
- * which it means. The tracked connection travels the same way, so the daemon holds no credential of its own and
- * each caller reaches the tracked database as themselves.
+ * {@code main} tracks - everything the daemon needs per request rather than reading from its own state, which is
+ * what makes it multi-user: the daemon holds no branch or credential of its own.
  *
  * @param trackedDatabase {@code null} until the client's workspace has run {@code dbgit init}
  */

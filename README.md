@@ -66,6 +66,30 @@ branch behind.
 `dbgit init` — your actual production or staging schema. Everything else forks. Credentials for it
 stay in your own workspace and are never written to shared storage.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    CLI["dbgit CLI"] -- "TCP socket\nDBGIT/1" --> Daemon
+    WebUI["Web UI"] -- HTTP --> Gateway["relay.py\n(API gateway)"] -- "TCP socket\nDBGIT/1" --> Daemon
+
+    Daemon["dbService daemon"] --> Meta[("metadata DB\nPostgreSQL")]
+    Daemon --> MainDB[("main\ntracked DB")]
+    Daemon --> Scratchpad
+
+    subgraph Scratchpad["Docker scratchpad container"]
+        direction TB
+        B1[("branch: feature-x")]
+        B2[("branch: feature-y")]
+    end
+```
+
+One daemon, many clients, no per-user state on the server — each request carries its own branch and
+credentials over its own socket. The metadata DB is the only source of truth for what branches and
+commits exist; every branch database (`main`'s tracked one included) is rebuilt from it by replay,
+never read back into it. The web UI never talks to the daemon directly — `relay.py` is a thin
+HTTP-to-TCP gateway in front of it, since a browser can't open a raw socket.
+
 ## Command summary
 
 - `dbgit init` — point `main` at the real database it tracks
@@ -322,3 +346,27 @@ ground - a branch whose table holds a few million rows - and then prints the com
 terminals: five `dbgit add`s racing for one column, of which exactly one wins, and a real migration - a CREATE INDEX over millions of rows - holding its branch for as long as
 PostgreSQL needs while reads of the same branch answer straight through. What each act proves,
 and what to say while it runs, is in `scripts/live-demo-concurrency.md`.
+
+## Deploying it as a service
+
+For running `dbgit` somewhere other than a laptop, with a browser UI in front of it instead of the CLI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/varunmundale/database-version-control/master/scripts/deploy/bootstrap.sh | bash
+```
+
+One command, no configuration required. `bootstrap.sh` clones the repo onto the machine; `setup.sh`
+then installs Docker, brings up three Postgres containers (the metadata store, the database `main`
+tracks, and the branch-fork scratchpad), installs a JDK, builds the project, and installs two systemd
+services — `dbgit-daemon` (`dbService`) and `dbgit-relay`, an HTTP-to-TCP bridge
+(`scripts/deploy/relay.py`) that lets a browser speak `dbgit`'s raw-TCP protocol, since a browser can't
+open a raw socket itself. Visiting `http://<vm>:8080/` opens `scripts/deploy/web/index.html`, a browser
+client for the same commands the CLI sends: each visitor gets their own branch/author identity, and
+`main`'s tracked connection is shared across all of them, set up once through the UI's own init step.
+
+Re-run `bootstrap.sh` any time to redeploy the latest `master`. `./scripts/deploy/setup.sh clean` tears
+down everything it created (containers, services, build output) without touching the Docker/JDK
+installs themselves.
+
+This sits in front of the same daemon and wire protocol described above — the relay doesn't change how
+`dbgit` works, it just gives a browser a way to reach it.

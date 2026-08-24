@@ -27,12 +27,8 @@ import java.util.List;
  *   #4 ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);
  * </pre>
  *
- * <p>{@code Branch} is the branch the commit was made on, which is not necessarily the branch being logged: a
- * fork inherits its parent's commits and a merge brings in another branch's, so this is what separates a branch's
- * own commits from the ones it merely shares.
- *
- * <p>A changeset's DDL is collapsed onto one line - it is stored exactly as written, newlines included, and a log
- * is read line by line.
+ * <p>{@code Branch} is the commit's origin branch, not necessarily the one being logged - a fork/merge can share
+ * commits made elsewhere. DDL is collapsed onto one line since it's stored exactly as written, newlines included.
  */
 public final class HistoryLogFormatter {
 

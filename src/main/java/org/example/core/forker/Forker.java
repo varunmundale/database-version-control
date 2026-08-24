@@ -79,9 +79,7 @@ public final class Forker {
             out("Recreating branch '" + currentBranch + "' from " + history.size() + " committed changeset(s) shared with '" + fromBranch + "'.");
             branchDatabases.replay(database, history);
         } catch (RuntimeException exception) {
-            // The name was claimed before any of this ran. Leaving it claimed would wedge it permanently:
-            // the branch would list, its database would not exist, and forking it again would be refused as
-            // already existing. Nothing has been staged on it yet, so giving it back is safe.
+            // Give the claimed name back rather than leaving it permanently wedged with no database behind it.
             abandon(currentBranch, database);
             throw exception instanceof ForkException forked ? forked : fail(exception.getMessage(), exception);
         }

@@ -6,11 +6,8 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Turns a raw {@code dbgit} command line's arguments into the matching {@link Command}. Owns command dispatch (the
- * shape each subcommand's argument list takes); each command's own behavior lives in its {@link Command} subclass.
- *
- * <p>Holds the daemon's shared collaborators and binds them to one caller's {@link RequestContext} per command, so
- * two clients can be served from the same factory without sharing a branch.
+ * Turns a raw {@code dbgit} command line's arguments into the matching {@link Command}, binding the daemon's
+ * shared collaborators to the caller's own {@link RequestContext} per call.
  */
 public final class CommandFactory {
     private final CommandContext context;

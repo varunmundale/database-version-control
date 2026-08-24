@@ -20,17 +20,9 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Merges another branch's diverged history into a target branch. Asks {@link Differ} - the same entry point
- * {@code dbgit diff} goes through - what the two branches' histories look like against each other: which of the
- * other branch's changesets this one doesn't have, and whether anything the two branches' fully replayed schemas
- * share genuinely disagrees, matched by stable id. A merge that decided either of those its own way could
- * contradict the diff the user was shown just before running it.
- *
- * <p>Free of conflicts, stages the merge in a scratch branch forked from the target's committed history,
- * physically replays the other branch's diverged changesets against it, and - only once that succeeds for real -
- * applies the same DDL to the target's own database and records a merge commit with two parents. A merge commit
- * itself carries no changesets; the changesets it brings in stay attributed to the commits that originally
- * introduced them, reachable by walking both parent chains ({@link VersioningService#commitHistory}).
+ * Merges another branch's diverged history into a target branch, via the same {@link Differ} {@code dbgit diff}
+ * uses, so a merge can't disagree with the diff the user was just shown. Conflict-free changes are replayed first
+ * against a scratch staging branch and only applied to the target once that succeeds for real.
  */
 public final class Merger {
     /** Distinguishes one merge attempt from another, so their staging branches cannot collide. */
@@ -53,12 +45,7 @@ public final class Merger {
         this.differ = Objects.requireNonNull(differ, "differ must not be null");
     }
 
-    /**
-     * Both branches are locked, in a fixed order, for the whole merge: the conflict check, the replay into two
-     * real databases and the merge commit are otherwise three views of a history that can move underneath them,
-     * and a merge commit whose parents were never the basis for what was replayed is corruption no later read
-     * can detect.
-     */
+    /** Both branches are locked, in a fixed order, for the whole merge, so history can't move underneath it. */
     public MergeResult merge(RequestContext request, String otherBranch) {
         try (BranchLease ignored = locks.acquire(request.branch(), otherBranch)) {
             return merged(request, otherBranch);
@@ -98,15 +85,9 @@ public final class Merger {
     }
 
     /**
-     * Everything {@link Differ} found genuinely conflicting between the two branches: a table, column, constraint
-     * or index both of them changed since they diverged, matched by stable id. A difference only one branch is
-     * responsible for is not here - that is exactly what the merge is bringing in. Named for the user rather than
-     * rendered as a tree: a merge reports why it stopped, it does not draw the diff.
-     *
-     * <p>A table-level conflict - both branches created, dropped or renamed the same table - is reported on its
-     * own, before its members: a table one side dropped and the other renamed has no members left to compare, so
-     * without this line such a conflict would otherwise report nothing at all and the merge would proceed onto
-     * whichever side happened to run second.
+     * Every table/column/constraint/index both branches changed since they diverged, as user-facing lines rather
+     * than a diff tree. A table-level conflict is reported on its own since a dropped-vs-renamed table has no
+     * members left to compare.
      */
     private static List<String> conflicts(HistoryDiff diff) {
         List<String> lines = new ArrayList<>();
@@ -128,28 +109,21 @@ public final class Merger {
         return lines;
     }
 
-    /**
-     * The staging branch exists only to prove the replay works before it touches the target's real database, so it
-     * goes as soon as that is settled - whether the merge succeeded or not. Best-effort: failing to clean up must
-     * not turn a completed merge into a reported failure.
-     */
+    /** Best-effort cleanup: failing to remove the staging branch must not turn a completed merge into a failure. */
     private void discard(String stagingBranch) {
         try {
             forker.branchDatabases().dropDatabase(BranchConnections.forkedDatabaseName(stagingBranch));
         } catch (RuntimeException ignored) {
-            // Left behind in the scratchpad; harmless, and the name will not be reused.
+            // harmless; the name will not be reused
         }
         try {
             forker.versioningService().deleteBranch(stagingBranch);
         } catch (RuntimeException ignored) {
-            // Ditto - it holds no changesets of its own.
+            // ditto
         }
     }
 
     private static String stagingBranchName(String currentBranch, String otherBranch) {
-        // Unique per attempt. The name used to be derived from the two branches alone, which was fine only while
-        // one merge could ever be in flight: two overlapping merges of the same pair - or one retried after a
-        // failure - collided on a branch that already existed, and the second was refused for the wrong reason.
         return "merge/" + currentBranch + "-" + otherBranch + "-" + Long.toHexString(NONCE.incrementAndGet());
     }
 }

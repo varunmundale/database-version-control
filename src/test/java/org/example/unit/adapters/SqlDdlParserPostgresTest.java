@@ -48,11 +48,7 @@ class SqlDdlParserPostgresTest {
         assertTrue(note.nullable());
     }
 
-    /**
-     * A type is SQL keywords, so the case it was typed in carries no meaning - but it is compared as a string, so
-     * the two spellings have to produce the same model. A branch compensating a retype back to what the shared
-     * history declared, in whatever case, must land back on that exact definition.
-     */
+    /** A type's case carries no meaning but is compared as a string, so both spellings must produce the same model. */
     @Test
     void aTypeIsCanonicalisedToUpperCaseSoTheCaseItWasWrittenInCarriesNoMeaning() {
         SchemaOperation.CreateTable created =
@@ -73,10 +69,7 @@ class SqlDdlParserPostgresTest {
         assertEquals("orders", operation.tableName());
     }
 
-    /**
-     * dbgit rebuilds a schema by replaying a history, so a statement must mean the same thing every time it runs -
-     * and IF NOT EXISTS means one thing on a branch that already has the table, another on one that doesn't.
-     */
+    /** A replayed statement must mean the same thing every time; IF NOT EXISTS doesn't. */
     @Test
     void rejectsCreateTableIfNotExists() {
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -151,11 +144,7 @@ class SqlDdlParserPostgresTest {
         assertEquals("INTEGER", operation.newType());
     }
 
-    /**
-     * MySQL's retype spelling. Postgres's {@link DialectGrammar} is strict to Postgres's own grammar - see
-     * {@link SqlDdlParserMySqlTest} for the same statement accepted by the parser configured for the dialect that
-     * understands it.
-     */
+    /** MySQL's retype spelling; each {@link DialectGrammar} is strict to its own dialect. */
     @Test
     void rejectsMySqlsModifyColumnSpelling() {
         assertThrows(IllegalArgumentException.class, () -> parser.parse("ALTER TABLE orders MODIFY COLUMN col1 BIGINT"));
@@ -372,11 +361,7 @@ class SqlDdlParserPostgresTest {
         assertTrue(exception.getMessage().contains("PRIMARY KEY, UNIQUE and FOREIGN KEY"), exception.getMessage());
     }
 
-    /**
-     * A constraint's name is its identity across branches, so the unnamed forms Postgres would auto-name are not
-     * accepted. They reach the parser with nothing identifying them at all, so the message points at the
-     * {@code ADD CONSTRAINT} form rather than at a name.
-     */
+    /** A constraint's name is its identity across branches, so Postgres's auto-named unnamed forms are rejected. */
     @Test
     void rejectsUnnamedConstraintForms() {
         for (String ddl : List.of("ALTER TABLE orders ADD PRIMARY KEY (id)",

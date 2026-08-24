@@ -13,11 +13,8 @@ import java.util.Objects;
 
 /**
  * {@code dbgit diff <left> <right>} - walks both branches' commit histories through {@link Differ}, the one place
- * two branches are compared (a merge asks it the same question), and prints what it found via
- * {@link HistoryDiffFormatter}: one node per table, one node per column, constraint or index that actually
- * differs, and every statement run against it on each side nested underneath. An object {@link Differ} finds
- * genuinely conflicting (matched by stable id, so a rename on one side racing a modification on the other still
- * counts) is labeled as such, with both sides' statements brought together in the same place.
+ * two branches are compared (a merge asks it the same question), and prints the result via
+ * {@link HistoryDiffFormatter}.
  */
 public final class DiffCommand extends Command {
     public static final CommandUsage USAGE = new CommandUsage("diff", "dbgit diff <branch1> <branch2>",

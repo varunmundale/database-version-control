@@ -5,16 +5,10 @@ import org.example.models.schema.StableId;
 import java.util.Objects;
 
 /**
- * The physical database a branch tracks, as the metadata store records it. The credential-free half of a
- * {@link ConnectionSettings}: enough to say <em>which</em> database a branch points at, with no password - so
- * recording what {@code main} tracks never distributes a secret. The password stays in the workspace's own
- * {@code .dbgit}.
- *
- * <p>The signature is derived rather than stored, so it cannot disagree with the details it summarises. It covers
- * host, port and database - the identity of the database itself, not of whoever connects to it - which is what
- * makes {@code dbgit init} idempotent: the same target always signs the same, from any workspace.
- *
- * <p>Named for the {@code Config} siblings in this package; it is the configuration of what a branch points at.
+ * The physical database a branch tracks, as the metadata store records it - the credential-free half of a
+ * {@link ConnectionSettings}, so recording what {@code main} tracks never distributes a secret. The password stays
+ * in the workspace's own {@code .dbgit}. The signature is derived from host/port/database rather than stored, which
+ * is what makes {@code dbgit init} idempotent: the same target always signs the same.
  */
 public record TrackedDatabaseConfig(String branch, String host, int port, String database, String user) {
     public TrackedDatabaseConfig {

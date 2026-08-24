@@ -4,14 +4,9 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * One commit as it is stored: its identity and place in the shared graph, the branch it was created on, plus who
- * created it and why. Commits predating branch/author/message tracking read back with the same defaults an
- * unattributed commit gets, so nothing downstream has to handle a null.
- *
- * <p>{@code branch} is where the commit was made, not where it can be seen: the graph is shared, so a fork
- * inherits its parent's commits and a merge brings in commits made on a branch that may since have been deleted.
- * That is exactly what makes it worth recording - it is the only thing that says which of the commits in a
- * branch's history are its own.
+ * One commit as stored: its identity and place in the shared graph, the branch it was created on, plus who made
+ * it and why. {@code branch} is where it was *made*, not where it's visible - the graph is shared across forks and
+ * merges, so this is the only thing that says which commits in a branch's history are its own.
  */
 public record Commit(long id, String branch, CommitMetadata metadata, Instant createdAt, CommitParents parents) {
     private static final String UNKNOWN_BRANCH = "unknown";

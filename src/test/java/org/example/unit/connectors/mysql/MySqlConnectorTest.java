@@ -21,9 +21,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * {@link MySqlConnector}/{@link MySqlConnections} against a real, throwaway MySQL container - proof the
- * {@code mysql} dialect genuinely works (real DDL, real {@code CREATE}/{@code DROP DATABASE}, and the
- * {@code ANSI_QUOTES} session variable that makes dbgit's double-quoted identifiers valid), the same way
- * {@code H2ConnectorTest} proves {@code h2} does. Skips without Docker, the same way the integration tests do.
+ * {@code mysql} dialect genuinely works. Skips without Docker.
  */
 class MySqlConnectorTest {
     private static MySQLContainer container;
@@ -63,11 +61,7 @@ class MySqlConnectorTest {
         }
     }
 
-    /**
-     * dbgit emits {@code CREATE DATABASE "name"} - a double-quoted identifier - regardless of dialect. Under
-     * MySQL's default sql_mode a double-quoted token is a string literal, not an identifier; {@link MySqlConnections}
-     * asks for {@code ANSI_QUOTES} precisely so this form is valid instead.
-     */
+    /** {@link MySqlConnections} sets ANSI_QUOTES so dbgit's double-quoted identifiers work under MySQL's own default sql_mode. */
     @Test
     void ansiQuotesModeMakesDoubleQuotedIdentifiersWorkTheWayDbgitEmitsThem() throws SQLException {
         try (MySqlConnector connector = new MySqlConnector(MySqlConnections.INSTANCE.open(settings()))) {

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # The one command you run on a brand-new machine: gets dbgit onto it and hands off to setup.sh, which
-# does everything else - Docker, a metadata Postgres on :5432, a "production" Postgres on :5433 (what
-# `main` tracks), a JDK, the build, and two systemd services. No configuration is required either way.
+# does everything else. No configuration is required.
 #
 #   curl -fsSL https://raw.githubusercontent.com/varunmundale/database-version-control/master/scripts/deploy/bootstrap.sh | bash
 #
@@ -10,13 +9,11 @@
 #   less bootstrap.sh   # read it
 #   bash bootstrap.sh
 #
-# Safe to re-run at any time, including to deploy an update: if the clone already exists, this
-# force-overwrites it to match the remote branch exactly (git fetch + reset --hard + clean -fdx)
-# rather than re-cloning from scratch - any local edits made directly on the machine are discarded,
-# on purpose, so it never quietly drifts from what's in git.
+# Safe to re-run any time, including to deploy an update: if the clone already exists, this
+# force-overwrites it to match the remote branch (git fetch + reset --hard + clean -fdx), discarding
+# any local edits made directly on the machine.
 #
-#   ./bootstrap.sh clean   # tears down every container/service/file setup.sh created, THEN redeploys
-#                          # from scratch - the equivalent of never having run this before.
+#   ./bootstrap.sh clean   # tears down everything setup.sh created, THEN redeploys from scratch
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-http://github.com/varunmundale/database-version-control.git}"

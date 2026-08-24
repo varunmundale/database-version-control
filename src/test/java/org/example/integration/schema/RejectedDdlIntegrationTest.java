@@ -12,15 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code constraints-rejected-demo.sh}: every way of smuggling a constraint or an index into a {@code CREATE
- * TABLE} is refused, and the refusal says what to write instead.
- *
- * <p>The rule is load-bearing rather than fussy. These forms used to be silently ignored, which left a constraint
- * that existed in the real database and in no part of dbgit's model - invisible to {@code diff}, and absent when
- * the branch was forked and its history replayed. Refusing is the only honest answer to a constraint the tool
- * cannot otherwise see.
- *
- * <p>Being an integration test rather than a parser test, each case also checks the two things a parser test
- * cannot: that nothing was staged, and that nothing reached the database.
+ * TABLE} is refused, with a message saying what to write instead. Unlike a parser test, each case also checks
+ * that nothing was staged and nothing reached the database.
  */
 class RejectedDdlIntegrationTest extends DbGitIntegrationTest {
 

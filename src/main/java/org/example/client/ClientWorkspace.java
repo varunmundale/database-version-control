@@ -14,20 +14,9 @@ import java.util.Optional;
 
 /**
  * One user's local {@code .dbgit} directory: a {@code HEAD} file naming the branch they are on, and a
- * {@code config.json} holding the connection their workspace dials. Which branches exist and what they contain
- * lives in the metadata store instead.
- *
- * <p>This is client-side on purpose. It used to sit in the daemon, which meant one shared {@code HEAD} for every
- * user of that daemon - A's {@code checkout} silently moved B. Now each workspace owns its own and tells the
- * daemon which branch it means, per request.
- *
- * <p>{@code config.json} is the only place a password is written. The metadata store records what a branch tracks
- * so any workspace can check it agrees, but never how to authenticate to it.
- *
- * <p>{@code config.json} also holds this workspace's author identity, set by the required {@code dbgit init
- * --author}. Nothing here falls back to the OS user - a workspace that has never run {@code init} sends no author
- * at all, and {@link RequestContext} attributes its commits to {@code "unknown"} rather than guessing at an
- * identity dbgit was never told.
+ * {@code config.json} holding the connection and author identity their workspace dials the daemon with per
+ * request. Deliberately client-side, not daemon-side, so one user's {@code checkout} can't move another's HEAD.
+ * {@code config.json} is the only place a password is written.
  */
 public final class ClientWorkspace {
     private static final ObjectMapper JSON = new ObjectMapper();

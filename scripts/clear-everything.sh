@@ -1,30 +1,14 @@
 #!/usr/bin/env bash
 # Puts dbgit back to the state it is in before anything has ever been run: no branches, no commits,
-# no changesets, no forked databases, no local workspace. Meant for after a demo, or when a demo
-# wants branch names ('current', 'other', 'mybranch') that a previous run already took.
+# no changesets, no forked databases, no local workspace. Clears, in order: every branch database in
+# the scratchpad container, the metadata store's four tables (truncated with RESTART IDENTITY, so the
+# next commit is #1 again), and this workspace's .dbgit/. The containers themselves are never
+# stopped. The database 'main' tracks is left alone unless --tracked is passed - dbgit did not create
+# it, the same reason 'dbgit reset' refuses main.
 #
-# The containers themselves are left running throughout - this drops what is inside them, never the
-# server it is inside. dbgit keeps its state in four places, and this clears all four, dependents
-# first:
-#
-#   1. the branch databases  - every database in the shared scratchpad container, dropped. dbgit
-#                              created all of them, so all of them go, including leftovers from a
-#                              fork that failed and staging branches from a merge that did not
-#                              finish. The container itself keeps running, ready for the next fork.
-#   2. the metadata store    - branch_metadata, branch_commits, branch_changesets and
-#                              tracked_databases, truncated with RESTART IDENTITY CASCADE so the
-#                              next commit is #1 again. The 'main' row goes back in, because that is
-#                              what metadata-schema.sql leaves behind on a fresh bootstrap and
-#                              'dbgit init' has a foreign key to it.
-#   3. this workspace        - .dbgit/ (HEAD and config.json) in the repo root.
-#   4. nothing else          - the database 'main' TRACKS is left alone. dbgit did not create it and
-#                              cannot replace it, which is the same reason 'dbgit reset' refuses
-#                              main. Pass --tracked if you do want it emptied.
-#
-# The tables are truncated rather than the metadata database dropped, deliberately: the daemon
-# creates that database and applies the schema once per process, so dropping it out from under a
-# running ./dbService leaves it pointed at a database that no longer exists. Truncating keeps a
-# running daemon working - just don't run this while a dbgit command is in flight.
+# Tables are truncated rather than the metadata database dropped: the daemon creates that database
+# once per process, so dropping it out from under a running ./dbService would leave it pointed at
+# nothing. Don't run this while a dbgit command is in flight.
 #
 # Needs Docker. psql is not needed on the host: every statement runs in a throwaway container off
 # the same image dbgit.json already names for the scratchpad.
@@ -130,12 +114,6 @@ if [ "$clear_tracked" = true ]; then
 else
     echo "Left alone: the database main tracks. Pass --tracked to empty that too."
 fi
-
-#if [ "$assume_yes" != true ]; then
-#    printf '\nType "clear" to go ahead: '
-#    read -r answer || answer=""
-#    [ "$answer" = "clear" ] || { echo "Nothing was deleted."; exit 1; }
-#fi
 
 echo
 echo "=== 1/4 Branch databases ==="

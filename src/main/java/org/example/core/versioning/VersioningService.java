@@ -22,10 +22,7 @@ public interface VersioningService {
     /** Atomically claims a branch name. Returns {@code false} if the branch already existed. */
     boolean createBranch(String branchName, String forkedFrom);
 
-    /**
-     * Gives up a branch name claimed by {@link #createBranch} whose database was never finished. Only safe for a
-     * branch that has staged nothing yet, which is exactly the window a failed fork leaves open.
-     */
+    /** Gives up a branch name whose database was never finished; only safe if it has staged nothing yet. */
     void deleteBranch(String branch);
 
     /** Stages a raw DDL statement for a branch with status PENDING. Returns the new changeset's id. */
@@ -41,38 +38,27 @@ public interface VersioningService {
     List<ChangeSet> changesetsForBranch(String branch);
 
     /**
-     * The branch's commits, walked from the root commit to its current HEAD, each with the changesets folded into
-     * it. The one ancestry walk everything else about a branch's history is derived from - {@code dbgit log}
-     * renders these, {@link #commitHistory} flattens them, and {@code dbgit reset} truncates them at a commit.
+     * The branch's commits, root to HEAD, each with its changesets folded in - the one ancestry walk the rest of a
+     * branch's history is derived from ({@link #commitHistory}, {@code dbgit log}/{@code reset}).
      */
     List<CommitEntry> commits(String branch);
 
-    /**
-     * Folds the given APPLIED changesets into one new commit, chained after the branch's current HEAD commit
-     * (updating both the new commit's backward pointer and the previous HEAD's forward pointer). Changesets not
-     * currently APPLIED are silently skipped. Returns the new commit's id.
-     */
+    /** Folds the given APPLIED changesets into one new commit chained after the branch's HEAD. Returns its id. */
     long commit(String branch, List<Long> changesetIds, CommitMetadata metadata);
 
     /**
-     * Creates a merge commit for {@code branch}: chains its current HEAD as the first parent and
-     * {@code otherBranch}'s current HEAD as the second parent. Carries no changesets of its own - the changesets it
-     * brings in stay attributed to the commits that originally introduced them, reachable by walking both parent
-     * chains. Moves {@code branch}'s HEAD to the new commit. Returns the new commit's id.
+     * Creates a merge commit for {@code branch}, chaining its HEAD and {@code otherBranch}'s HEAD as its two
+     * parents; carries no changesets of its own. Moves {@code branch}'s HEAD to the new commit. Returns its id.
      */
     long createMergeCommit(String branch, String otherBranch, CommitMetadata metadata);
 
     /**
-     * Moves a branch's HEAD back to {@code commitId} and discards its working set outright. The commit must be one
-     * of the branch's own ancestors. Commits after it are left in the graph untouched, just no longer reachable
-     * from this branch - other branches may still share them. Returns how many working changesets were dropped.
+     * Moves a branch's HEAD back to one of its own ancestor commits and discards its working set. Later commits
+     * stay in the shared graph, just unreachable from this branch. Returns how many working changesets were dropped.
      */
     int resetTo(String branch, long commitId);
 
-    /**
-     * Records which physical database a branch's DDL is applied to, replacing any previous record for that branch.
-     * Credential-free by construction - see {@link TrackedDatabaseConfig}. Returns what is now tracked.
-     */
+    /** Records which physical database a branch's DDL is applied to, replacing any previous record. */
     TrackedDatabaseConfig track(String branch, ConnectionSettings settings);
 
     /** What the branch tracks, or empty if it has never been initialised. */
@@ -91,9 +77,8 @@ public interface VersioningService {
     }
 
     /**
-     * Everything staged on a branch that no commit has claimed yet, in staged order - what {@code dbgit log} shows
-     * above the commits and what {@code dbgit reset} throws away. Wider than {@link #appliedChangesets}: a
-     * changeset that failed against the database is still PENDING, and still part of what is lying around.
+     * Everything staged on a branch that no commit has claimed yet, in staged order. Wider than
+     * {@link #appliedChangesets}: a changeset still PENDING (its DDL failed) is still part of what's lying around.
      */
     default List<ChangeSet> workingSet(String branch) {
         return changesetsForBranch(branch).stream()
@@ -108,11 +93,7 @@ public interface VersioningService {
                 .toList();
     }
 
-    /**
-     * The changesets that make up a branch's current schema, in order: its inherited/committed history (reached via
-     * the shared commit chain, regardless of which branch originally created each commit) followed by its own
-     * not-yet-committed applied changesets.
-     */
+    /** The changesets making up a branch's current schema: committed history, then its own applied-not-yet-committed ones. */
     default List<ChangeSet> branchHistory(String branch) {
         List<ChangeSet> history = new ArrayList<>(commitHistory(branch));
         history.addAll(appliedChangesets(branch));

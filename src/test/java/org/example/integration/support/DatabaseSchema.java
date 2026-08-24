@@ -12,20 +12,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * What a branch's database actually looks like, read back out of it.
- *
- * <p>This is the half of an integration test the unit tests cannot reach. dbgit never introspects a database - it
- * writes DDL into one and replays history into another - so the only way to show that a fork, a merge or a reset
- * put the schema it claimed into the database it built is to go and look. Everything here reads
- * {@code INFORMATION_SCHEMA} directly, deliberately bypassing dbgit's own model.
- *
- * <p>Connects through the real {@link H2Connections}, the same connector production code opens branch databases
- * through - not a test double. No bookkeeping of its own is needed here: every database this reads was already
- * created (and, on a fresh fork or reset, already emptied) by {@code BranchDatabaseRepository} before this ever
- * looks at it.
- *
- * <p>H2 folds unquoted identifiers to upper case; every name is handed back lower-cased, so assertions read the
- * way the DDL that created them was written.
+ * What a branch's database actually looks like, read back out of {@code INFORMATION_SCHEMA} directly - since
+ * dbgit itself never introspects a database, this is the only way a test can confirm a fork, merge or reset put
+ * the schema it claimed into the database it built. Every name is handed back lower-cased, since H2 folds
+ * unquoted identifiers to upper case and assertions should read the way the DDL was written.
  */
 public final class DatabaseSchema {
     public List<String> tables(String database) {

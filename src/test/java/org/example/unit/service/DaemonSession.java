@@ -11,12 +11,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * One client's session with the daemon, for tests that drive it without a socket. Stands in for what
- * {@code org.example.client.Main} does: it remembers which branch this caller is on and which database its
- * workspace tracks, and sends both with every command - because the daemon no longer keeps either.
- *
- * <p>Like the real client it updates that local state only after the daemon accepts the command, so a rejected
- * {@code checkout} leaves the session where it was.
+ * One client's session with the daemon, for tests that drive it without a socket - tracks the caller's branch and
+ * tracked database and sends both with every command, updating them only after the daemon accepts.
  */
 final class DaemonSession {
     private final DbGitCommandListener listener;

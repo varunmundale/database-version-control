@@ -10,12 +10,7 @@ public final class ProcessCommandRunner implements CommandRunner {
     /** Generous enough for a cold image pull; short enough that a wedged command cannot cost a thread forever. */
     private static final int TIMEOUT_MINUTES = 10;
 
-    /**
-     * Bounded, because the daemon runs a fixed number of handler threads: a {@code docker} that never returns
-     * would hold one of them for the life of the process, and enough of them would take the daemon down. The
-     * timeout is generous - a cold image pull is legitimately slow - and only ever fires on a genuinely stuck
-     * command, which is reported rather than waited on.
-     */
+    /** Bounded so a hung {@code docker} process can't hold a handler thread forever. */
     @Override
     public CommandResult run(List<String> command) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();

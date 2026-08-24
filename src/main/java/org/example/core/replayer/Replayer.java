@@ -13,16 +13,10 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Rebuilds a schema entirely in memory - no database, no scratch connection - by reading each changeset's raw
- * {@code ddl}, extracting its {@link SchemaOperation} via a {@link DdlParser} (chosen by
- * {@code branchDatabases.dialect} - see {@link DdlParserRegistry} - by default), and folding it into a
- * {@link TableModel} via {@link SchemaOperationApplier}. This class owns neither concern itself: parsing is
- * per-vendor and injected, applying is shared and stateless, so this class stays the same regardless of which
- * dialect's DDL grammar is actually being replayed.
- *
- * <p>{@code dbgit add}'s own preview goes through the same {@link DdlParser} and {@link SchemaOperationApplier}
- * (via {@link #tableName} and {@link #apply}), so there is exactly one parser and one applier in play anywhere in
- * the tool.
+ * Rebuilds a schema entirely in memory - no database - by parsing each changeset's raw {@code ddl} via a
+ * {@link DdlParser} (chosen by {@code branchDatabases.dialect}, see {@link DdlParserRegistry}) into a
+ * {@link SchemaOperation} and folding it into a {@link TableModel} via {@link SchemaOperationApplier}.
+ * {@code dbgit add}'s preview uses this same parser/applier pair, so there is exactly one of each in the tool.
  */
 public final class Replayer {
     private static final String SCHEMA = "public";
@@ -38,11 +32,7 @@ public final class Replayer {
         this.ddlParser = Objects.requireNonNull(ddlParser, "ddlParser must not be null");
     }
 
-    /**
-     * Rebuilds a schema by reading {@code changesets} and applying each one's ddl, in order, into a fresh map. Pure
-     * in-memory. The map never holds a {@code null} value: {@link #apply} removes a dropped or renamed-away table's
-     * key rather than storing one, so nothing downstream has to guard against it.
-     */
+    /** Applies each changeset's ddl, in order, into a fresh map; {@link #apply} keeps it free of {@code null} values. */
     public Map<String, TableModel> replay(List<ChangeSet> changesets) {
         Map<String, TableModel> schema = new LinkedHashMap<>();
         for (ChangeSet changeset : changesets) {
@@ -60,17 +50,10 @@ public final class Replayer {
     }
 
     /**
-     * Applies one DDL statement to {@code schema}, mutating it in place, and returns the table's new state (or
-     * {@code null} if the statement was a {@code DROP TABLE}).
-     *
-     * <p>{@link SchemaOperationApplier} edits one {@link TableModel} it is handed and knows nothing of the schema
-     * as a whole, so moving its answer to the right map key - the same key for most operations, a different one
-     * for a rename, no key at all for a drop - is this method's job, and the reason it takes the whole map rather
-     * than one table. It is also the only place two things can be checked, since only here is the rest of the
-     * schema visible: a rename onto a name already taken, and a fresh table minting the stable id a still-live
-     * table already carries under a different name - which {@code CREATE TABLE orders} can do the moment something
-     * else has been renamed away from {@code orders}, since a table's id is derived from its name (see
-     * {@link TableModel#create}) and nothing else stops the same id being minted twice.
+     * Applies one DDL statement to {@code schema} in place, returning the table's new state ({@code null} for
+     * {@code DROP TABLE}). Moves the result to the right map key (rename/drop included) and, since this is the only
+     * place the whole schema is visible, rejects a rename or a fresh {@code CREATE TABLE} that collides with a name
+     * or stable id already in use.
      */
     public TableModel apply(Map<String, TableModel> schema, String ddl) {
         SchemaOperation operation = ddlParser.parse(ddl);

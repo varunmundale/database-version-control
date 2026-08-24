@@ -19,11 +19,7 @@ public final class Committer {
         this.locks = Objects.requireNonNull(locks, "locks must not be null");
     }
 
-    /**
-     * Under the branch's lock, because reading which changesets are applied and folding them into a commit are
-     * two transactions: without it a changeset staged in between is silently dropped from the commit that
-     * claims it, and the count reported to the user is wrong.
-     */
+    /** Under the branch's lock: reading applied changesets and folding them into a commit are two transactions. */
     public CommitResult commit(String branch, CommitMetadata metadata) {
         try (BranchLease ignored = locks.acquire(branch)) {
             return committed(branch, metadata);

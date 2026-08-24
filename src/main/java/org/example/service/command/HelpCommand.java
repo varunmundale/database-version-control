@@ -7,13 +7,9 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * {@code dbgit help} - lists every dispatchable command's synopsis and one-line description. {@code dbgit help
- * <command>} prints just that one, in full.
- *
- * <p>{@link #CATALOG} is the single place the documentation is assembled, but it holds no text of its own - each
- * entry is another command's own {@code USAGE} constant, so this list and what {@link CommandFactory} actually
- * dispatches can't drift apart. {@code CreateBranchCommand} is deliberately absent: {@code checkout -b} is not its
- * own verb, and {@link CheckoutCommand#USAGE} already documents it.
+ * {@code dbgit help} - lists every command's synopsis and description; {@code dbgit help <command>} prints just
+ * that one. {@link #CATALOG} holds no text of its own, only each command's own {@code USAGE} constant, so this
+ * list can't drift from what {@link CommandFactory} dispatches.
  */
 public final class HelpCommand extends Command {
     public static final CommandUsage USAGE = new CommandUsage("help", "dbgit help [<command>]",

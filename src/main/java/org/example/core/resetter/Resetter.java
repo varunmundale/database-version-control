@@ -16,18 +16,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Takes a branch back to a commit: its history is truncated there, its working set is discarded outright, and its
- * database is rebuilt from scratch by replaying what is left. Nothing is patched or undone - a reset branch is
- * exactly a branch forked at that commit, which is the only way to be sure the database matches the history when
- * dbgit has no notion of an inverse DDL statement.
- *
- * <p>The order is deliberate. The truncated history is replayed in memory first, so an incoherent one fails before
- * anything is destroyed. Metadata moves next, in one transaction. The database is rebuilt last, because that is
- * the step that cannot be transactional - if it fails part-way, the metadata already describes the target commit
- * and running the same reset again finishes the job.
- *
- * <p>{@code main} is refused. It tracks a real, pre-existing database rather than a scratchpad fork, and dropping
- * that to rebuild it from dbgit's history would destroy data dbgit never created and cannot replace.
+ * Takes a branch back to a commit by truncating its history there, discarding its working set, and rebuilding its
+ * database from scratch - dbgit has no inverse DDL, so a reset is exactly a fresh fork at that commit. Order is
+ * deliberate: replay in memory first (fails before anything is destroyed), then metadata in one transaction, then
+ * the non-transactional database rebuild last (a failure there leaves metadata already pointing at the target, so
+ * re-running finishes the job). {@code main} is refused since it tracks a real database dbgit didn't create.
  */
 public final class Resetter {
     private static final String DEFAULT_BRANCH = "main";
@@ -53,8 +46,7 @@ public final class Resetter {
                     + " branch instead, or point 'main' elsewhere with 'dbgit init'.");
         }
 
-        // Global rather than per-branch, and a cold image pull takes minutes - so it happens before the branch
-        // is locked, where it would stall every other command on that branch for the duration.
+        // Outside the lock: a cold image pull takes minutes and would stall every other command on this branch.
         forker.ensureBranchDatabasesRunning();
 
         try (BranchLease ignored = locks.acquire(branch)) {
@@ -78,11 +70,7 @@ public final class Resetter {
         return new ResetResult(branch, commitId, dropped, history.size(), schema.size());
     }
 
-    /**
-     * Everything committed up to and including {@code commitId}, in replay order. Walking the branch's own commits
-     * is what rejects a commit belonging to some other branch: it is a real commit, but not one this branch can be
-     * taken back to.
-     */
+    /** Everything committed up to and including {@code commitId}, in replay order; rejects a commit from another branch. */
     private static List<ChangeSet> historyThrough(List<CommitEntry> commits, String branch, long commitId) {
         for (int index = 0; index < commits.size(); index++) {
             if (commits.get(index).commitId() == commitId) {

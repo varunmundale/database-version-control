@@ -13,14 +13,9 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Ensures the single, persistent Docker container every branch's database is forked into is running and ready to
- * accept connections - starting it via the Docker CLI if it isn't, then polling until it accepts a real connection.
- *
- * <p>A no-op for any {@code branchDatabases.dialect} {@link ContainerSpec} has no entry for: an in-memory H2
- * database needs no server, no container and no Docker at all, so starting one would be pure waste. For a dialect
- * that is a real server process - {@code postgresql}, {@code mysql} - the spec supplies the one thing that differs
- * between them (the image's own env vars, its container port); everything else here - the readiness poll, the
- * reuse-if-already-running check - is genuinely the same regardless of which server it is.
+ * Ensures the single, persistent Docker container every branch's database is forked into is running and ready,
+ * starting it via the Docker CLI if needed. A no-op for a dialect with no {@link ContainerSpec} entry (H2, which
+ * needs no server at all).
  */
 public final class SharedContainer {
     private static final Logger LOG = LoggerFactory.getLogger(SharedContainer.class);

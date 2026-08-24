@@ -30,12 +30,7 @@ public final class Stager {
         this.locks = Objects.requireNonNull(locks, "locks must not be null");
     }
 
-    /**
-     * Held under the branch's lock from the first read to the last write. The staged changeset, the DDL that
-     * actually runs, and the row that records it having run are three separate transactions with an
-     * irreversible statement in the middle, so nothing but a lock spanning all of it keeps two concurrent adds
-     * from validating against the same past and executing in an order their changeset ids do not describe.
-     */
+    /** Held under the branch's lock end to end, since the stage/execute/mark-applied steps are three separate transactions around one irreversible statement. */
     public StageResult stage(RequestContext request, String statement) {
         String branch = request.branch();
         try (BranchLease ignored = locks.acquire(branch)) {
@@ -55,9 +50,7 @@ public final class Stager {
         try {
             forker.branchDatabases().apply(connections.forBranch(request, branch), statement);
         } catch (RuntimeException exception) {
-            // The row was written before the statement ran. Left behind it would sit at PENDING forever:
-            // excluded from appliedChangesets so it can never be committed, yet counted in the working set
-            // and destroyed by the next reset. It describes something that never happened, so it goes.
+            // Otherwise it sits at PENDING forever: uncommittable, but still counted in the working set.
             versioningService.discardChangeset(changesetId);
             throw exception;
         }

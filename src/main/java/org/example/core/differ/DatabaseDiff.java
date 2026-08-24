@@ -12,16 +12,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Computes the diff between two branches' internal schema representations, as one {@link TableDiff} per table that
- * differs. Each table is its own independent schema object, so the diff is computed one table at a time: this class
- * pairs tables up by stable id - not by name, which is what lets a rename on either side read as one table whose
- * name differs rather than one table dropped and a different one added - and leaves {@link TableDiff#between} to
- * work out what changed inside each pairing. Results are ordered by table name, then by id to keep the order
- * deterministic on the rare occasion a rename leaves two different tables sharing a display name.
- *
- * <p>An instantiable collaborator, like every other class in this codebase that does real work (see
- * {@link org.example.core.replayer.Replayer}, {@link org.example.core.replayer.SchemaOperationApplier}) - not a static
- * utility holder - even though it currently has no state or configuration of its own.
+ * Diffs two branches' schemas, as one {@link TableDiff} per table that differs. Tables are paired by stable id, not
+ * name, so a rename on either side reads as one table whose name differs rather than a drop plus an add; each
+ * pairing's contents are worked out by {@link TableDiff#between}. Results are ordered by table name, then id.
  */
 public final class DatabaseDiff {
 

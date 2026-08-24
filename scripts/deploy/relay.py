@@ -1,76 +1,44 @@
 #!/usr/bin/env python3
-"""Thin HTTP-to-TCP relay in front of a running dbService daemon.
+"""Thin HTTP-to-TCP relay in front of a running dbService daemon, so a browser (which can't open a
+raw TCP socket) can speak dbgit's DBGIT/1 wire protocol. Turns a JSON request into the same
+header+command line DbGitClient would send, and hands the exact response back; dbgit itself is
+unaware of any of this.
 
-dbgit's own wire protocol (DBGIT/1) is raw TCP, and a browser cannot open a raw TCP socket. This
-relay is the bridge: it turns a JSON request into the header+command line DbGitClient itself would
-send, and hands the exact response back. dbgit source is untouched, and the daemon still knows
-nothing about any of this - see CommandContext/RequestHeader, rebuilt fresh per request, no per-user
-state in the daemon ever.
+Stateful on purpose, in two shapes (see workspace_store.WorkspaceStore): `main`'s tracked connection
+is a singleton shared by every author, while which branch an author has checked out is per-author -
+the same thing `.dbgit/HEAD` is per local directory for the real CLI.
 
-The relay itself, though, *is* now stateful, on purpose - split into two very different pieces of
-state (see workspace_store.WorkspaceStore for why): `main`'s tracked connection is a *singleton*,
-initialized once and shared by every author (that's what `InitCommand`/`BranchConnections` actually
-model - there's no such thing as "an author's own main"), while which branch an author currently has
-checked out is per-author, the same thing ClientWorkspace's `.dbgit/HEAD` tracks per local directory
-for the real CLI. That means a browser session no longer resends db-host/db-port/... on every call,
-and the UI can force a first-time visitor through `/init` once, globally, rather than every author
-separately.
+POST /run/<author> - {"command": "dbgit log", "body": null}
+    `body` is only meaningful when `command` is `dbgit add` (its DDL). If this author is new, their
+    branch defaults to "main". A command that fails only because main isn't tracked yet gets a nudge
+    line pointing at /init/<author> appended; the UI enforces init up front by gating on
+    GET /workspace's `initialized` flag instead of relying on this. A successful checkout updates the
+    caller's stored branch.
 
-POST /run/<author> with a JSON body:
-    {"command": "dbgit log", "body": null}
-    {"command": "dbgit add", "body": "CREATE TABLE t (id INT);"}
+POST /init/<author> - {"db": {"host": ..., "port": ..., "database": ..., "user": ..., "password": ...}}
+    Runs `dbgit init`, pointing the one shared `main` at this connection for every author. Any field
+    left out of `db` (or `db` omitted) falls back to whatever main already tracks, or DEFAULT_DB.
 
-`author` is mandatory and lives in the URL, not the body - see the module docstring above. `body` is
-only meaningful when `command` is `dbgit add` - see Main.run in the Java client: every other command
-is one line, `add` is followed by the raw DDL until the client closes its half of the socket.
+GET /workspace/<author> - {"ok": true, "workspace": {...}}, the same shape /run and /init carry, for
+    a UI to poll. Creates the author's branch record if it didn't exist; never creates main_db.
 
-If this author hasn't been seen before, their branch defaults to "main" - "author not present ->
-create workspace." Nothing is blocked preemptively for main lacking a tracked connection: it
-(BranchConnections.forBranch) is only ever needed by a command that touches main itself - every other
-branch is a scratchpad fork addressed by name, no credentials required. So a command run before
-`/init` has ever been called goes through exactly as it would from the real CLI, and only if the
-daemon itself refuses it for main not tracking a database does the relay append a nudge line pointing
-at `/init/<author>` - the UI is what actually forces this up front (see index.html), by refusing to
-show the command runner until GET /workspace says `initialized`. A `dbgit checkout ...` that succeeds
-updates the caller's stored branch, same as `.dbgit/HEAD` would.
+Response shape for /run and /init: {"ok": bool, "lines": [...], "workspace": {...}} - "ok" mirrors
+    the daemon's OK/ERR status line; "lines" is everything after it; "workspace" is
+    {"author", "branch", "initialized", "db"} with the password stripped before it reaches a browser.
 
-POST /init/<author> with an optional JSON body:
-    {"db": {"host": "...", "port": 5432, "database": "...", "user": "...", "password": "..."}}
+POST /admin/run - {"name": "clear-everything"}
+    Runs one server-side script from the fixed ADMIN_SCRIPTS allowlist below - never an arbitrary
+    client-supplied command, since a public IP plus "run whatever string the client sends" is a
+    remote-code-execution hole. A successful clear-everything also resets WORKSPACES, since that
+    script truncates tracked_databases/branch_metadata on the daemon side regardless of `--tracked`.
 
-Runs `dbgit init`, pointing the one shared `main` at this connection - for every author, not just the
-caller. Any field left out of `db` (or `db` omitted entirely) falls back to whatever main already
-tracks, or DEFAULT_DB if nothing does yet. On success that connection is stored as main_db and from
-then on every author's GET /workspace reports `initialized: true` immediately, with no init of their
-own required - "initialized exactly once."
-
-GET /workspace/<author> returns {"ok": true, "workspace": {...}} - the same shape /run and /init
-responses carry, for a UI to poll on its own (e.g. right after the author field changes). This also
-creates the author's branch record if it didn't exist yet, same as /run does; it never creates main_db.
-
-Response shape for /run and /init: {"ok": true/false, "lines": [...], "workspace": {...}} - "ok"
-mirrors the OK/ERR status line DbGitCommandListener writes (or is false without ever reaching it, for
-the "not initialized" nudge); "lines" is everything after it, split the same way DbGitClient prints to
-stdout/stderr; "workspace" is {"author", "branch", "initialized", "db"} with the password stripped out
-of "db" before it goes back over the wire to a browser.
-
-POST /admin/run runs one server-side script, from a fixed allowlist below - NOT an arbitrary shell
-command. A public IP plus a literal "run whatever string the client sends" endpoint is a remote-code-
-execution hole; this is the version of "run a script on the server from the client" that doesn't open
-one. Body: {"name": "clear-everything"}. `name` must be a key in ADMIN_SCRIPTS - there is no way to
-pass a path or arguments from the client, so nothing beyond what is listed below can ever run. A
-successful `clear-everything` also resets WORKSPACES (main_db forgotten, every author's branch back to
-"main") - see WorkspaceStore.clear()'s docstring for why: that script TRUNCATEs tracked_databases and
-branch_metadata on the daemon side regardless of `--tracked`, so this relay's cache of them would
-otherwise go stale the moment it runs.
-Unauthenticated by design (no token) - the allowlist is the only guard. Anyone who can reach this
-port can run anything in ADMIN_SCRIPTS, so keep that list short and keep this off the open internet
-unless you mean it. The same is true of every endpoint above: there is no login, so anyone who can
-reach this port can act as any author and read back main's stored (unhashed) db-user - see
-workspace_store.describe_workspace for why the db *password* specifically never round-trips back out.
+Unauthenticated by design - the allowlist is the only guard, and every endpoint above lets anyone who
+can reach this port act as any author. Keep ADMIN_SCRIPTS short and this off the open internet unless
+you mean it.
 
 Run standalone: python3 relay.py [--relay-port 8080] [--dbgit-host 127.0.0.1] [--dbgit-port 47615]
                                   [--web-dir web] [--repo-dir ..] [--state-file /etc/dbgit/web-workspaces.json]
-No third-party dependencies - only the standard library, so nothing to install on the VM.
+No third-party dependencies - only the standard library.
 """
 import argparse
 import json
@@ -180,12 +148,8 @@ class Handler(BaseHTTPRequestHandler):
         main_db = WORKSPACES.main_db()
         initializing = INIT_COMMAND.match(command) is not None
 
-        # Only main's tracked connection ever needs db-* - every other branch is a scratchpad fork
-        # addressed by name (BranchConnections.forBranch). So there is nothing to gate here for an
-        # author working entirely on a feature branch; sending db-* along anyway when we have it is
-        # harmless (unused unless the branch in play is main). The nudge below is reactive, not
-        # preemptive, precisely because "not initialized" only actually matters once a command tries to
-        # touch main's live database - which the daemon itself is what knows.
+        # Only main's tracked connection ever needs db-*; sending it along for a feature-branch
+        # command is harmless since the daemon just ignores it.
         db = db_from_payload(payload, main_db) if initializing else main_db
         header = build_header(author, "main" if initializing else branch, db)
         self._run_and_respond(header, command, body, author, branch, initializing)
@@ -233,9 +197,6 @@ class Handler(BaseHTTPRequestHandler):
                     branch = target.group(1)
                     WORKSPACES.set_branch(author, branch)
         elif WORKSPACES.main_db() is None and any("is not tracking a database yet" in line for line in lines):
-            # The one error BranchConnections.forBranch actually raises for this - see its docstring.
-            # Reactive, not preemptive: this only fires for a command that truly needed main's tracked
-            # connection, never for one that was happily working on a feature branch.
             lines = lines + [f"Hint: POST /init/{urllib.parse.quote(author, safe='')} to fix this - "
                               f"defaults to {DEFAULT_DB['host']}:{DEFAULT_DB['port']}/{DEFAULT_DB['database']} "
                               "if you don't send your own db details."]
@@ -244,9 +205,7 @@ class Handler(BaseHTTPRequestHandler):
                           "workspace": describe_workspace(author, branch, WORKSPACES.main_db())})
 
     def _handle_admin_run(self):
-        """Runs one server-side script from ADMIN_SCRIPTS - see the module docstring for why this is
-        an allowlist keyed by name rather than anything the client can turn into an arbitrary command.
-        No token check: the allowlist itself is the only guard here, on purpose - see the docstring."""
+        """Runs one server-side script from ADMIN_SCRIPTS - see the module docstring."""
         try:
             payload = self._read_json()
             name = payload.get("name") or ""
@@ -264,10 +223,7 @@ class Handler(BaseHTTPRequestHandler):
             lines = (result.stdout + result.stderr).splitlines()
             ok = result.returncode == 0
             if ok and name == "clear-everything":
-                # clear-everything.sh TRUNCATEs tracked_databases and resets branch_metadata to just
-                # 'main' on the daemon side every run - see WorkspaceStore.clear()'s docstring for why
-                # this cache has to be reset in lockstep rather than going stale.
-                WORKSPACES.clear()
+                WORKSPACES.clear()  # keep this cache in step with what the script just truncated
             self._json(200, {"ok": ok, "lines": lines})
         except subprocess.TimeoutExpired:
             self._json(504, {"ok": False, "lines": [f"'{name}' did not finish within {timeout}s"]})
@@ -306,10 +262,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def restart_daemon(service: str):
-    """Every start of the relay forces a fresh dbService too, by design: a relay restart is what
-    deploying a rebuilt daemon is supposed to trigger. Best-effort - if systemctl or sudo isn't there
-    (e.g. running relay.py standalone on a machine with no systemd), this only warns and the relay
-    still comes up, talking to whatever dbService is already running, if anything."""
+    """Every relay start also restarts dbService, since deploying a rebuilt daemon is what a relay
+    restart is for. Best-effort: without systemd/sudo this only warns."""
     try:
         result = subprocess.run(["sudo", "systemctl", "restart", service],
                                  capture_output=True, text=True, timeout=30)

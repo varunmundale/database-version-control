@@ -4,11 +4,8 @@ import org.example.models.schema.ColumnModel;
 import org.example.models.schema.StableId;
 
 /**
- * One column, matched by stable id, that differs between two sides - see {@link #side()}. {@link Side#BOTH} says
- * only that both branches have the column and describe it differently, which includes a rename on one side (a
- * stable id can legitimately carry a different name on each side); whether that is a conflict depends on what the
- * column looked like before the two branches diverged, and is {@link SideChanges}' call. Carries the actual
- * {@link ColumnModel}s rather than a pre-rendered message, so callers decide how (or whether) to display it.
+ * One column, matched by stable id, that differs between two sides. {@link Side#BOTH} only means both branches
+ * describe the column differently (a rename included); whether that's a conflict is {@link SideChanges}' call.
  */
 public record ColumnDiff(StableId id, ColumnModel left, ColumnModel right) implements ElementDiff<ColumnModel> {
     public ColumnDiff {

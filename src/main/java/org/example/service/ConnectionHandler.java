@@ -15,13 +15,8 @@ import java.util.Arrays;
 
 /**
  * Frames one accepted connection into a request and dispatches it: a {@link RequestHeader} line, then the command
- * line, then - for {@code dbgit add} alone - a body. Owns one socket for its whole life, closing it however the
- * command turns out. The accept loop and thread pool that hand it a socket belong to {@link DbGitCommandListener};
- * this class knows nothing about either.
- *
- * <p>What gets logged deliberately stops at the command line: the header carries {@code db-password}, and
- * {@code dbgit add}'s DDL body arrives separately and is already recorded as a changeset, so neither needs a
- * second copy in the log.
+ * line, then - for {@code dbgit add} alone - a body. Owns the socket for its whole life. Logging deliberately stops
+ * at the command line: the header carries {@code db-password}, so that never gets a second copy in the log.
  */
 final class ConnectionHandler implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(ConnectionHandler.class);
@@ -49,7 +44,7 @@ final class ConnectionHandler implements Runnable {
         }
     }
 
-    /** Called instead of {@link #run()} when the pool's queue is full - the socket still needs an answer. */
+    /** Called instead of {@link #run()} when the pool's queue is full; the socket still needs an answer. */
     void reject() {
         LOG.warn("Server busy: all {} handlers are in use and the queue is full; rejecting a connection.",
                 concurrency.handlerThreads());
@@ -62,14 +57,9 @@ final class ConnectionHandler implements Runnable {
         }
     }
 
-    /**
-     * A request is a {@link RequestHeader} line, then the command, then - for {@code dbgit add} alone - a body.
-     * The header is mandatory: the branch and the tracked database's credentials both arrive on it, so a request
-     * without one carries too little to act on.
-     */
+    /** The header is mandatory: the branch and the tracked database's credentials both arrive on it. */
     private void handle(Socket socket) throws IOException {
-        // Without this a client that opens a connection and never speaks - or never closes its `dbgit add` body -
-        // holds one of the pool's threads indefinitely.
+        // Without this a client that never speaks (or never closes its `dbgit add` body) holds a pool thread forever.
         socket.setSoTimeout(concurrency.socketTimeoutMs());
         try (SocketReader reader = new SocketReader(socket);
              SocketWriter writer = new SocketWriter(socket)) {
@@ -103,10 +93,7 @@ final class ConnectionHandler implements Runnable {
         }
     }
 
-    /**
-     * Only {@code dbgit add} carries a body - its DDL can span lines, so it arrives after the command line rather
-     * than inside it - so only that branch asks the reader for what is left.
-     */
+    /** Only {@code dbgit add} carries a body, since its DDL can span lines. */
     private DbGitCommandResult dispatch(RequestContext request, String commandLine, SocketReader reader)
             throws IOException {
         if (commandLine.trim().equals(ADD_COMMAND)) {

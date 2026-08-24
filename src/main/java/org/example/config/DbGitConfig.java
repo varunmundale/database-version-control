@@ -42,11 +42,7 @@ final class DbGitConfig {
         return value.asInt();
     }
 
-    /**
-     * A section that need not be there at all - an empty object stands in for a missing one, so every field in it
-     * falls back to its default. This is what lets a {@code dbgit.json} written before a section existed keep
-     * working: {@link #section} refuses a missing section, which is right for the ones dbgit cannot run without.
-     */
+    /** A section that need not be there at all; an empty object stands in so every field falls back to its default. */
     static JsonNode optionalSection(String name) {
         JsonNode section = ROOT.get(name);
         return section == null || !section.isObject() ? JsonNodeFactory.instance.objectNode() : section;
@@ -66,11 +62,6 @@ final class DbGitConfig {
             throw new IllegalStateException("Non-numeric configuration key: " + field);
         }
         return value.asInt();
-    }
-
-    static boolean optionalBoolean(JsonNode section, String field, boolean defaultValue) {
-        JsonNode value = section.get(field);
-        return value == null ? defaultValue : value.asBoolean(defaultValue);
     }
 
     private static JsonNode load() {

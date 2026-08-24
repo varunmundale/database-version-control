@@ -15,29 +15,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The one way two branches are compared. {@code dbgit diff} enters here and so does
- * {@link org.example.core.merger.Merger} - a merge asks the same question a diff does (what does the other branch
- * have that this one doesn't, and does anything genuinely disagree), so it must get the same answer, computed the
- * same way. Everything else in this package is a collaborator: {@link Replayer} turns a history into schema,
- * {@link DatabaseDiff}/{@link TableDiff} compare two schemas, {@link SideChanges} says which branch each
- * difference belongs to, {@link HistoryDiff} is the result and {@link HistoryDiffFormatter} renders it.
- *
- * <p>Divergence is a set difference by commit id, never a positional prefix: a commit id is unique and stable
- * regardless of where in a branch's own flattened history it turns up, and once either branch has been the target
- * of a merge, a shared commit sits at different indexes on the two sides - a merge commit's second-parent
- * contributions sort after the first parent's own unique commits. Comparing positions replayed already-shared
- * changesets a second time.
- *
- * <p>A difference is not a disagreement, and neither says whose it is, so both are decided against a third
- * schema: the one the branches shared when they diverged, replayed from the commits both of them carry. Comparing
- * only the two sides made any differing column a conflict, including one a branch had simply not received yet -
- * which is why a branch reset back to before its own change was still refused the merge that would have brought
- * the other's in.
- *
- * <p>Attribution - which statement touched which column, constraint or index - is worked out by replaying the
- * history one statement at a time and asking {@link TableDiff#between} what that statement changed about its
- * table, so it uses the same matching-by-stable-id a whole-schema diff does. Only the changesets exclusive to a
- * side are attributed; one both branches already share has nothing to report.
+ * The one way two branches are compared: {@code dbgit diff} and {@link org.example.core.merger.Merger} both enter
+ * here, so they always get the same answer. Divergence is a set difference by commit id, never a positional
+ * prefix - a shared commit can sit at different indexes in each branch's flattened history once either has been
+ * the target of a merge. Differences are judged against a third schema, the one the branches shared when they
+ * diverged, which is what tells a genuine conflict from a change one side just hasn't received yet
+ * ({@link SideChanges}). Attribution (which statement touched which object) replays history one statement at a
+ * time and asks {@link TableDiff#between} what changed, for changesets exclusive to a side only.
  */
 public final class Differ {
     private final Replayer replayer;
@@ -52,11 +36,7 @@ public final class Differ {
         this.databaseDiff = Objects.requireNonNull(databaseDiff, "databaseDiff must not be null");
     }
 
-    /**
-     * Compares two branches by their commit histories, newest state against newest state: what each side alone
-     * carries, which tables actually differ once both histories are replayed in full, which of those differences
-     * both branches are responsible for, and which of those exclusive statements touched each object.
-     */
+    /** Compares two branches by their commit histories, newest state against newest state. */
     public HistoryDiff diff(List<CommitEntry> leftCommits, List<CommitEntry> rightCommits) {
         List<ChangeSet> leftOnly = exclusiveChangesets(leftCommits, rightCommits);
         List<ChangeSet> rightOnly = exclusiveChangesets(rightCommits, leftCommits);
@@ -73,11 +53,7 @@ public final class Differ {
                 attribute(leftHistory, idsOf(leftOnly)), attribute(rightHistory, idsOf(rightOnly)));
     }
 
-    /**
-     * The history both branches already share - every commit each of them carries - which is the schema they
-     * diverged from, and so the only thing that can say which side changed what. Taken in the left branch's own
-     * order: the shared commits are ancestry-closed on both sides, so either order replays the same schema.
-     */
+    /** The commits both branches carry - the schema they diverged from. Either branch's order replays the same schema. */
     private static List<ChangeSet> sharedChangesets(List<CommitEntry> left, List<CommitEntry> right) {
         Set<Long> rightIds = right.stream().map(CommitEntry::commitId).collect(Collectors.toSet());
         return left.stream()
@@ -110,11 +86,7 @@ public final class Differ {
                 .toList();
     }
 
-    /**
-     * Walks one branch's whole history a statement at a time - a statement can only be read against the table as
-     * it stood just before it - recording, for the changesets in {@code onlyIds}, every object that statement
-     * changed.
-     */
+    /** Walks history a statement at a time, recording - for changesets in {@code onlyIds} - every object each changed. */
     private Map<StableId, List<ChangeSet>> attribute(List<ChangeSet> history, Set<Long> onlyIds) {
         Map<String, TableModel> tables = new LinkedHashMap<>();
         Map<StableId, List<ChangeSet>> byObject = new LinkedHashMap<>();
@@ -129,11 +101,6 @@ public final class Differ {
         return byObject;
     }
 
-    /**
-     * A dropped table has no {@code after} and a created one no {@code before}; {@link TableDiff#between} already
-     * treats a missing side as contributing nothing, the same way it does for a table diffed at the whole-schema
-     * level.
-     */
     private static void recordTouched(TableModel before, TableModel after, ChangeSet changeset,
                                       Map<StableId, List<ChangeSet>> byObject) {
         TableDiff delta = TableDiff.between(before, after);

@@ -27,21 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * A whole dbgit installation, assembled per test: a live daemon on a port of its own, the real metadata store on a
- * PostgreSQL container, real branch databases on in-memory H2, and a client with its own {@code .dbgit} directory
- * talking to the daemon over a socket.
- *
- * <p>What separates these tests from the unit tests next door is that almost nothing is a double. The versioning
- * service is the real {@link MetadataVersioningService} over real jOOQ against real PostgreSQL; branches really are
- * serialized through PostgreSQL advisory locks; DDL really runs against a database engine, and a fork really
- * replays a history into a new one. Only two things are stood in for, and for reasons that are not about the code
- * under test: the branch databases are H2 rather than one PostgreSQL container per branch - via
- * {@code ConnectorRegistry.builtins().get("h2")}, the exact lookup {@code BranchDatabaseRepository.getInstance()}
- * would do in production for {@code branchDatabases.dialect: "h2"} - and the {@code docker} CLI is answered by a
- * stub, since with H2 there is no container to bring up.
- *
- * <p>Each test gets an empty metadata store and empty branch databases, so commit and changeset numbering starts
- * at 1 every time and a test can say {@code commit #1} rather than counting what ran before it.
+ * A whole dbgit installation, assembled per test: a live daemon, the real metadata store on a PostgreSQL
+ * container, branch databases on in-memory H2 (standing in only for the per-branch PostgreSQL container, not
+ * for the code under test - see {@code branchDatabases.dialect: "h2"}), and a client with its own {@code .dbgit}
+ * directory talking to the daemon over a socket. Each test gets an empty metadata store and empty branch
+ * databases, so commit/changeset numbering starts at 1 every time.
  */
 public abstract class DbGitIntegrationTest {
     /** The database {@code main} tracks - a real, pre-existing one in production; an H2 database here. */
@@ -70,10 +60,8 @@ public abstract class DbGitIntegrationTest {
     @BeforeEach
     void startDaemon() throws IOException {
         MetadataStore.reset();
-        // Every other branch's database is emptied for free, by createDatabase()/dropDatabase()'s own H2
-        // translation, the moment a test forks or resets it. main's tracked database is the one exception - nothing
-        // ever creates or drops it, since dbgit add on main writes to it directly - so it is the one thing here that
-        // has to be emptied explicitly between tests, reusing the same production dropDatabase() everything else does.
+        // main's tracked database is never created/dropped by a fork or reset like every other branch's is, since
+        // dbgit add on main writes to it directly - so it must be emptied explicitly between tests.
         BRANCH_DATABASES.dropDatabase(TRACKED_DATABASE);
 
         daemon = new DbGitCommandListener(forker(), 0, ConcurrencyConfig.getInstance(), locks());
@@ -121,12 +109,8 @@ public abstract class DbGitIntegrationTest {
     }
 
     /**
-     * Another caller of the same daemon, with a {@code .dbgit} directory - and so a checked-out branch and an
-     * author - of its own. What a concurrency test uses in place of the shell scripts' {@code new_workspace}/
-     * {@code dbgit_in}: the daemon holds no per-user state, so two workspaces talking to the one running daemon
-     * are genuinely independent callers, not a simulation of them. Named {@code name}, and commits as {@code name}
-     * too - a caller switched workspaces, so its commits should say so - via the same {@code dbgit init --author}
-     * every workspace here uses, since that is the only place an author is ever set.
+     * Another caller of the same daemon, with its own {@code .dbgit} directory, branch and author - the daemon
+     * holds no per-user state, so this is a genuinely independent caller, not a simulation of one.
      */
     protected DbGitCli newWorkspace(String name) throws IOException {
         Path directory = Files.createDirectory(workspaceDirectory.resolve(name));
@@ -148,20 +132,13 @@ public abstract class DbGitIntegrationTest {
         return new Forker(new NoDocker(), BRANCH_DATABASES, new MetadataVersioningService());
     }
 
-    /**
-     * The real advisory lock, on the metadata container. Every mutating command takes it for its whole duration,
-     * so running it here rather than the in-memory double keeps the tests honest about a branch lock being a
-     * PostgreSQL session lock that has to be acquired, held across side effects and released.
-     */
+    /** The real advisory lock on the metadata container, not the in-memory double, so locking is genuinely tested. */
     private static BranchLocks locks() {
         return new BranchLocks(new AdvisoryBranchLock(),
                 Duration.ofMillis(ConcurrencyConfig.getInstance().lockTimeoutMs()));
     }
 
-    /**
-     * Answers {@code docker inspect} as though the scratchpad container were already up. With branch databases on
-     * H2 there is nothing to start, and the readiness poll that follows connects for real - to H2 - and passes.
-     */
+    /** Answers {@code docker inspect} as though the scratchpad container were already up; H2 needs no real one. */
     private static final class NoDocker implements CommandRunner {
         @Override
         public CommandResult run(List<String> command) {

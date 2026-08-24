@@ -6,22 +6,10 @@ import org.example.models.schema.TableModel;
 import java.util.List;
 
 /**
- * Applies an already-parsed {@link SchemaOperation} to one table, with no knowledge of any vendor's DDL syntax.
- * Every {@link org.example.adapters.DdlParser}, whatever dialect it understands, produces operations that land
- * here unchanged.
- *
- * <p>Editing a table - finding a member by name, rejecting a name already taken, folding the result back into the
- * table - is {@link TableModel}'s own job now, so what is left here is only what a {@link TableModel} cannot do for
- * itself: deciding whether a table already existing is an error, and resolving a foreign key's target, which names
- * a different table than the one being edited.
- *
- * <p>The dispatch is a pattern switch over a sealed type rather than a registry of handlers: the compiler then
- * proves every operation is handled, and adding one to {@link SchemaOperation} fails the build here until it is.
- *
- * <p>{@link #apply} can return {@code null} - only {@link SchemaOperation.DropTable} does this, meaning "no table
- * left under this name" - because this class edits one table it is given and has no view of the schema as a whole.
- * Moving the returned table to a new map key (a {@link SchemaOperation.RenameTable}) or removing it (a drop) is the
- * caller's job; see {@link Replayer#apply}, the only caller.
+ * Applies an already-parsed {@link SchemaOperation} to one table; dialect-agnostic, since every {@link
+ * org.example.adapters.DdlParser} produces operations that land here unchanged. {@link #apply} can return
+ * {@code null} (only for {@link SchemaOperation.DropTable}) meaning "no table left under this name" - moving the
+ * result to the right map key is {@link Replayer#apply}'s job, since this class has no view of the schema as a whole.
  */
 public final class SchemaOperationApplier {
 
@@ -73,10 +61,7 @@ public final class SchemaOperationApplier {
                 referencedTableId, referencedColumnIds(referencedTableId, op.referencedColumnNames()));
     }
 
-    /**
-     * A foreign key's target lives on another table, which the replay may not have built yet - and does not need
-     * to have, since a stable id is derived from the logical path rather than looked up.
-     */
+    /** A stable id is derived, not looked up, so the referenced table need not exist yet in the replay. */
     private static List<StableId> referencedColumnIds(StableId referencedTableId, List<String> columnNames) {
         if (referencedTableId == null) {
             return List.of();

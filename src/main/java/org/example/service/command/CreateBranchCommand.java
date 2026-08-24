@@ -8,8 +8,7 @@ import java.util.Objects;
 
 /** {@code dbgit checkout -b <branch>} - forks the current branch's database and switches to the new branch. */
 public final class CreateBranchCommand extends Command {
-    /** Not its own dispatchable verb - {@code checkout}'s {@link CheckoutCommand#USAGE} covers {@code -b} - but
-     * every {@link Command} still documents itself, this one included. */
+    /** Not its own dispatchable verb - {@code checkout}'s {@link CheckoutCommand#USAGE} covers {@code -b}. */
     public static final CommandUsage USAGE = new CommandUsage("checkout -b", "dbgit checkout -b <branch>",
             "Forks the current branch's database into a new branch and switches to it.");
 

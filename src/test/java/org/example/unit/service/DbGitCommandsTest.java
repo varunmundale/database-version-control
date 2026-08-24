@@ -602,11 +602,7 @@ class DbGitCommandsTest {
         return lines.stream().filter(line -> !line.startsWith("Date:") && !line.isBlank()).toList();
     }
 
-    /**
-     * The failure this guards against is the worst one in the system, and it is silent: two commits both parent
-     * off the same HEAD, the second overwrites it, and the first becomes reachable from nothing - while its
-     * changesets are already marked COMMIT, so neither the working set nor a reset can ever find them again.
-     */
+    /** Guards against a lost commit: two commits racing off the same HEAD must not silently overwrite each other. */
     @Test
     void concurrentCommittersOnOneBranchDoNotLoseEachOthersCommits() throws Exception {
         int committers = 4;
@@ -643,11 +639,7 @@ class DbGitCommandsTest {
         assertTrue(metadataStore.workingSet("feature/orders").isEmpty());
     }
 
-    /**
-     * The row is written before the statement runs. Left behind it would sit at PENDING forever: excluded from
-     * appliedChangesets so it could never be committed, yet counted in the working set and destroyed by the next
-     * reset - a record of something that never happened.
-     */
+    /** A changeset whose DDL fails should not survive as a stuck PENDING row. */
     @Test
     void aChangesetWhoseDdlFailsAgainstTheDatabaseIsNotLeftBehind() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
@@ -661,10 +653,7 @@ class DbGitCommandsTest {
         assertTrue(metadataStore.workingSet("main").isEmpty());
     }
 
-    /**
-     * The name is claimed before the database is built. Leaving it claimed would wedge it permanently: the branch
-     * would list, its database would not exist, and forking it again would be refused as already existing.
-     */
+    /** A branch name claimed before its database is built must be given back if the build fails. */
     @Test
     void aForkThatFailsPartWayGivesTheBranchNameBack() {
         InMemoryMetadataStore metadataStore = new InMemoryMetadataStore();
@@ -675,8 +664,7 @@ class DbGitCommandsTest {
 
         assertFalse(metadataStore.branches().contains("feature/orders"),
                 "the half-built branch should not hold its name");
-        // And the name is free again, so a retry is possible rather than permanently refused.
-        assertTrue(metadataStore.createBranch("feature/orders", "main"));
+        assertTrue(metadataStore.createBranch("feature/orders", "main"), "the name should be free again");
     }
 
     /** Fails one specific statement and passes everything else, so a failure can be aimed at one step. */
@@ -883,11 +871,7 @@ class DbGitCommandsTest {
             return entries;
         }
 
-        /**
-         * Walks a commit's ancestry via both parents (first parent's full history, then anything reachable only
-         * through the second parent, then the commit itself), skipping a commit already visited so a common
-         * ancestor shared by both parents of a merge is emitted exactly once, at its original position.
-         */
+        /** First parent's ancestry, then the second parent's, then this commit - skipping anything already seen. */
         private void collectOrder(Long commitId, Set<Long> seen, List<Long> order) {
             if (commitId == null || seen.contains(commitId)) {
                 return;

@@ -9,17 +9,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * What {@link Differ} found between two branches' commit histories: the changesets each side has and the other
- * doesn't, every table whose fully replayed schema differs, which side actually moved each of those differing
- * objects since the branches diverged ({@link SideChanges}), and - by {@link StableId} - which of those exclusive
- * statements touched each column, constraint or index. Everything a consumer of a diff needs and nothing about how
- * it is displayed: {@link HistoryDiffFormatter} renders this for {@code dbgit diff}, while
- * {@link org.example.core.merger.Merger} reads the same value for conflicts and for the changesets a merge has to
- * replay.
- *
- * <p>{@link #isEmpty()} is about divergence, not about tables: two histories can diverge and still net out to the
- * same schema (a column added and dropped again on one side), which is a diff with no tables in it rather than no
- * diff at all.
+ * What {@link Differ} found between two branches' histories: the changesets exclusive to each side, every table
+ * whose replayed schema differs, which side actually moved each differing object ({@link SideChanges}), and which
+ * exclusive statements touched each column/constraint/index. {@link HistoryDiffFormatter} renders this for
+ * {@code dbgit diff}; {@link org.example.core.merger.Merger} reads it for conflicts and what to replay.
  */
 public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, List<TableDiff> tables,
                           SideChanges changes,
@@ -40,11 +33,7 @@ public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, L
                 Map.of(), Map.of());
     }
 
-    /**
-     * True when both branches changed this object since they diverged, so a merge cannot pick a winner. An object
-     * that differs but that only one branch touched is not this: it is a change the other branch has yet to
-     * receive.
-     */
+    /** True when both branches changed this object since they diverged, so a merge cannot pick a winner. */
     public boolean isConflicting(StableId id) {
         return changes.conflicting(id);
     }
@@ -55,11 +44,8 @@ public record HistoryDiff(List<ChangeSet> leftOnly, List<ChangeSet> rightOnly, L
     }
 
     /**
-     * The left branch's own statements against the object with this id, oldest first - and none at all unless the
-     * branch actually left the object somewhere new. A branch that retyped a column and then retyped it back has
-     * run statements against it but changed nothing, and reporting those under a difference it is not responsible
-     * for reads as though it were: the compensating statement that settled a conflict would still be shown as one
-     * side of it.
+     * The left branch's own statements against this object, oldest first - empty unless the branch actually left
+     * the object somewhere new (a retype followed by a compensating retype back reports nothing).
      */
     public List<ChangeSet> leftStatements(StableId id) {
         return changes.changedLeft(id) ? leftStatements.getOrDefault(id, List.of()) : List.of();

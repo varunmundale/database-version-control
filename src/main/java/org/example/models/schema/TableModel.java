@@ -6,13 +6,10 @@ import java.util.Objects;
 import java.util.function.UnaryOperator;
 
 /**
- * A table's schema, and the only place that edits it: every {@link org.example.core.replayer.SchemaOperation} that
- * targets an existing table is applied by calling one of these methods directly, so
- * {@link org.example.core.replayer.SchemaOperationApplier} does no more than dispatch to them.
- *
- * <p>Columns, constraints and indexes are all edited by the same shape - look a member up by name, reject a name
- * already taken, fold the result back into the table - so that shape is written once, as the private generic
- * helpers below, rather than once per member kind.
+ * A table's schema, and the only place that edits it - {@link org.example.core.replayer.SchemaOperationApplier}
+ * just dispatches to these methods. Columns, constraints and indexes are all edited by the same shape (look a
+ * member up by name, reject a name already taken, fold the result back in), written once as the generic helpers
+ * below rather than per member kind.
  */
 public record TableModel(StableId id, String schema, String name, List<ColumnModel> columns,
                          List<IndexModel> indexes, List<ConstraintModel> constraints) implements SchemaElement<TableModel> {
@@ -53,22 +50,17 @@ public record TableModel(StableId id, String schema, String name, List<ColumnMod
         return replaceColumn(columnName, column -> column.retyped(newType));
     }
 
-    /**
-     * The same table under a new name; its stable id - and therefore every column, constraint and index id derived
-     * from it via {@link StableId#forColumn}/{@link StableId#forConstraint}/{@link StableId#forIndex} - is carried
-     * over unchanged. Re-deriving the id from the new name would make every member of the table read as replaced.
-     */
+    /** Same table, new name: the stable id (and every column/constraint/index id derived from it) is carried over
+     *  unchanged, so members don't read as replaced. */
     public TableModel renamedTo(String newName) {
         return new TableModel(id, schema, newName, columns, indexes, constraints);
     }
 
     /**
-     * True when this table, matched by id with another, is a different table to report - which for a table means
-     * it was renamed, and nothing else. Deliberately narrower than every other {@link SchemaElement}: two branches
-     * adding different columns have both "changed the table" in the everyday sense, and if that counted here,
-     * {@link org.example.core.differ.SideChanges} would call it a conflict and refuse a merge that works today.
-     * What the table's contents did is already reported, member by member, by
-     * {@link org.example.core.differ.TableDiff}.
+     * True only when the table was renamed - deliberately narrower than other {@link SchemaElement}s, since two
+     * branches editing different columns of the same table must not read as both having "changed the table"
+     * (that would make {@link org.example.core.differ.SideChanges} call it a conflict). Column/constraint/index
+     * changes are reported separately by {@link org.example.core.differ.TableDiff}.
      */
     @Override
     public boolean differsFrom(TableModel other) {

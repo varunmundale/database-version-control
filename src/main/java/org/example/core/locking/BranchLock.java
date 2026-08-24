@@ -3,10 +3,9 @@ package org.example.core.locking;
 import java.time.Duration;
 
 /**
- * Serializes work on one branch. The lock is held for a whole operation rather than for a transaction, because
- * the operations that need it - staging DDL, committing, merging, forking, resetting - interleave metadata writes
- * with side effects that cannot be rolled back: live DDL, {@code CREATE}/{@code DROP DATABASE}, {@code docker}. A
- * transaction-scoped lock would already be released by the time those run.
+ * Serializes work on one branch, held for a whole operation rather than one transaction, since these operations
+ * interleave metadata writes with side effects (live DDL, {@code docker}) that a transaction-scoped lock would
+ * already have released by the time they run.
  */
 public interface BranchLock {
     /**

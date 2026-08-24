@@ -4,10 +4,8 @@ import org.example.models.schema.ConstraintModel;
 import org.example.models.schema.StableId;
 
 /**
- * One constraint, matched by stable id, that differs between two sides - see {@link #side()}.
- * {@link Side#BOTH} means both branches have a constraint of this name but defined differently, e.g. a
- * {@code UNIQUE} over different columns on each side - a conflict only if both of them changed it
- * ({@link SideChanges}).
+ * One constraint, matched by stable id, that differs between two sides. {@link Side#BOTH} means both branches
+ * defined a constraint of this name differently - a conflict only if both actually changed it ({@link SideChanges}).
  */
 public record ConstraintDiff(StableId id, ConstraintModel left, ConstraintModel right) implements ElementDiff<ConstraintModel> {
     public ConstraintDiff {

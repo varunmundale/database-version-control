@@ -16,11 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Every concrete {@link Command} is expected to carry its own documentation - a {@code public static final
- * CommandUsage USAGE} field, the same way every one implements {@link Command#execute()}. Java has no such thing
- * as an abstract static member, so unlike {@code execute()} that contract can't be enforced by the compiler; this
- * test is what actually enforces it. Add a new {@code Command} subclass without a {@code USAGE} constant and this
- * fails, rather than {@code dbgit help} silently omitting it.
+ * Every concrete {@link Command} must carry a {@code public static final CommandUsage USAGE} field. Java can't
+ * enforce an abstract static member at compile time, so this test enforces it instead.
  */
 class CommandUsageTest {
     private static final String COMMAND_PACKAGE = "org.example.service.command";
@@ -49,11 +46,7 @@ class CommandUsageTest {
         }
     }
 
-    /**
-     * Every {@code .class} file the compiler emitted for {@link #COMMAND_PACKAGE}, found by walking the compiled
-     * directory rather than a hand-maintained list of classes - so a newly added command is picked up automatically
-     * instead of silently escaping this check.
-     */
+    /** Walks the compiled directory rather than a hand-maintained list, so a new command is picked up automatically. */
     private static List<Class<?>> commandClasses() throws Exception {
         URL packageUrl = Thread.currentThread().getContextClassLoader().getResource(COMMAND_PACKAGE.replace('.', '/'));
         assertNotNull(packageUrl, "Expected " + COMMAND_PACKAGE + " to be on the test classpath.");

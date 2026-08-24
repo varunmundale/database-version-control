@@ -7,18 +7,9 @@ import org.example.request.RequestContext;
 import java.util.Objects;
 
 /**
- * Decides which database a branch's DDL is actually applied to. Two different answers:
- *
- * <ul>
- *   <li>{@code main} tracks a real, pre-existing database - the one the caller's workspace was initialised
- *       against. Its connection, credentials included, arrives on the request.</li>
- *   <li>every other branch is a fork living in the shared scratchpad container, addressed by a sanitized name.</li>
- * </ul>
- *
- * <p>The connection for {@code main} comes from the {@link RequestContext} rather than from any file the daemon
- * owns, which is what lets two users of one daemon reach two different tracked databases - each as themselves.
- * Before that workspace has run {@code dbgit init} there is nothing to point at, and saying so is better than
- * quietly writing to the scratchpad.
+ * Decides which database a branch's DDL is actually applied to: {@code main} tracks a real, pre-existing database
+ * whose connection (credentials included) arrives on the {@link RequestContext}, so different daemon users can
+ * each point it at their own; every other branch is a fork living in the shared scratchpad container.
  */
 public final class BranchConnections {
     private final BranchDatabaseConfig config;

@@ -12,16 +12,11 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * {@code dbgit init} - points {@code main} at a real, already-existing database, so that everything committed on
- * {@code main} is applied there rather than to a throwaway scratchpad.
- *
- * <p>The connection arrives on the request, parsed and held by the caller's own workspace; the daemon never stores
- * it. All this command records is a {@link TrackedDatabaseConfig} in the metadata store: a signature plus host,
- * port, database and user, so any workspace can see what {@code main} is supposed to point at. The password is not
- * part of that record and has nowhere shared to live.
- *
- * <p>Idempotent: initialising against the same database twice signs the same. Pointing it somewhere else repoints
- * {@code main}, keeping its commit history.
+ * {@code dbgit init} - points {@code main} at a real, already-existing database. Records a {@link
+ * TrackedDatabaseConfig} in the metadata store (host, port, database, user and a derived signature, no password)
+ * so any workspace can see what {@code main} tracks; the password itself stays in the caller's own workspace.
+ * Idempotent - re-running against the same target just refreshes the connection; a different target repoints
+ * {@code main} while keeping its commit history.
  */
 public final class InitCommand extends Command {
     public static final CommandUsage USAGE = new CommandUsage("init",
