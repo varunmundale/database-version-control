@@ -12,46 +12,142 @@
   label { display: block; font-size: 0.8rem; opacity: 0.75; margin-top: 0.5rem; }
   input, textarea { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 0.95rem;
                      padding: 0.4rem; margin-top: 0.15rem; }
+  input:disabled { opacity: 0.55; cursor: not-allowed; }
   textarea { resize: vertical; }
   .row { display: flex; gap: 0.5rem; }
   .row > div { flex: 1; }
   button { margin-top: 0.75rem; padding: 0.5rem 1.2rem; font-family: inherit; cursor: pointer; }
-  pre#out { white-space: pre-wrap; padding: 0.75rem; border-radius: 6px; min-height: 4rem;
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre#out, pre#init-out, pre#admin-out { white-space: pre-wrap; padding: 0.75rem; border-radius: 6px; min-height: 2rem;
              background: #8881; border: 1px solid #8888; }
-  pre#out.err { border-color: #c33; }
+  pre.err { border-color: #c33; }
   small { opacity: 0.6; }
+  #workspace-status { font-size: 0.85rem; margin-top: 0.5rem; }
+  #workspace-status.uninitialized { color: #c80; }
+  #workspace-status.initialized { opacity: 0.75; }
+  details { margin-bottom: 1rem; }
+  details > summary { cursor: pointer; font-size: 0.9rem; }
+  details table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.85rem; }
+  details th, details td { text-align: left; padding: 0.35rem 0.5rem; vertical-align: top;
+                            border-bottom: 1px solid #8884; }
+  details code { white-space: nowrap; }
 </style>
 </head>
 <body>
-<h1>dbgit — request / response</h1>
-<small>Every field here is exactly what the <code>DBGIT/1</code> header and the command line carry -
-nothing is remembered between requests, the same way the daemon itself keeps no per-user state.</small>
+<h1>dbgit — try it in the browser</h1>
+<p><code>dbgit</code> is version control for a database <em>schema</em>, the way git is version control
+for code: you fork an isolated branch database, stage schema changes (DDL statements like
+<code>CREATE TABLE</code>), commit them, and later diff or merge branches. It supports several SQL
+dialects (Postgres, MySQL, H2) - this particular deployment is set up to talk to Postgres, but nothing
+below is Postgres-specific to dbgit itself. Normally you'd do all of this from a terminal with the
+<code>./dbgit</code> command-line tool talking to a background daemon (<code>./dbService</code>). This
+page <em>is</em> that same tool - every field below sends the exact same request a terminal would,
+just filled in with a form instead of typed by hand.</p>
+
+<details>
+<summary>How this page maps to the command line</summary>
+<table>
+<tr><th>On this page</th><th>Equivalent from a terminal</th></tr>
+<tr><td>the <b>author</b> field</td>
+    <td>the <code>--author</code> you'd pass to <code>dbgit init</code>, and the name dbgit records
+        against every commit you make - like git's <code>user.name</code></td></tr>
+<tr><td><b>Initialize main's tracked database</b></td>
+    <td><code>./dbgit init --host &lt;h&gt; --port &lt;p&gt; --database &lt;d&gt; --user &lt;u&gt;
+        --password &lt;w&gt; --author &lt;you&gt;</code> - points the branch <code>main</code> at a
+        real, already-existing database (Postgres, for this deployment). Done once, for everyone,
+        ever.</td></tr>
+<tr><td>the <b>command</b> field</td>
+    <td>literally what you'd type after <code>./dbgit</code> - typing <code>checkout -b feature</code>
+        here is the same as running <code>./dbgit checkout -b feature</code></td></tr>
+<tr><td>the <b>DDL body</b> box</td>
+    <td>what you'd normally pipe in on stdin, e.g.
+        <code>echo "CREATE TABLE t (id INT);" | ./dbgit add</code></td></tr>
+<tr><td><b>Admin &gt; clear-everything</b></td>
+    <td>running <code>./scripts/clear-everything.sh -y</code> yourself - wipes every branch, commit
+        and changeset and un-tracks <code>main</code>, but leaves the actual database
+        <code>main</code> was tracking untouched</td></tr>
+</table>
+</details>
 
 <fieldset>
-<legend>Who's asking</legend>
+<legend>Who you are</legend>
+<label>author — a name that identifies you (any name works; new ones are created automatically)</label>
 <div class="row">
-  <div><label>author</label><input id="author" value="webuser"></div>
-  <div><label>branch</label><input id="branch" value="main"></div>
+  <div><input id="author" value="webuser"></div>
+  <div style="flex: 0"><button id="author-change">Switch</button></div>
 </div>
+<small>Typing here doesn't do anything by itself yet - click Switch (or press Enter) to actually
+become that author. Until then, everything below still runs as whoever you last switched to, so a
+half-typed name can't accidentally get used.</small>
+<div id="workspace-status"></div>
 </fieldset>
 
-<fieldset>
-<legend>Tracked database (only needed for <code>init</code> or commands on <code>main</code>)</legend>
+<fieldset id="init-fieldset">
+<legend id="init-legend">Step 1: point "main" at a database</legend>
+<small id="init-help">Nobody has done this yet for this system, so it comes first. Fill in a Postgres
+database below and click Initialize - or just click it as-is, since these fields already default to
+the demo database this deployment set up for you. This only ever needs to happen once, for the whole
+system, not once per person.</small>
 <div class="row">
-  <div><label>db-host</label><input id="db-host" value="localhost"></div>
-  <div><label>db-port</label><input id="db-port" value="5433"></div>
-  <div><label>db-database</label><input id="db-database" value="postgres"></div>
+  <div><label>host</label><input id="db-host" value="localhost"></div>
+  <div><label>port</label><input id="db-port" value="5433"></div>
+  <div><label>database</label><input id="db-database" value="postgres"></div>
 </div>
 <div class="row">
-  <div><label>db-user</label><input id="db-user" value="postgres"></div>
-  <div><label>db-password</label><input id="db-password" type="password" value="postgres"></div>
+  <div><label>user</label><input id="db-user" value="postgres"></div>
+  <div><label>password</label><input id="db-password" type="password" value="postgres"></div>
 </div>
+<button id="init-run">Initialize</button>
+<pre id="init-out"></pre>
 </fieldset>
 
-<label>command (e.g. <code>dbgit branch</code>, <code>dbgit checkout -b feature</code>, <code>dbgit add</code>, <code>dbgit commit -m message</code>, <code>dbgit diff a b</code>)</label>
-<input id="command" value="dbgit init">
+<div id="app" hidden>
 
-<label>DDL body — only sent when the command is <code>dbgit add</code></label>
+<details>
+<summary>All dbgit commands, with an example of each</summary>
+<table>
+<tr><th>Command</th><th>Example</th><th>What it does</th></tr>
+<tr><td><code>init</code></td><td><em>(already done in Step 1 above)</em></td>
+    <td>Points <code>main</code> at a real database. One-time setup, not a day-to-day command.</td></tr>
+<tr><td><code>branch</code></td><td><code>dbgit branch</code></td>
+    <td>Lists every branch that exists, marking the one you're currently on with <code>*</code>. A
+        good first command to run.</td></tr>
+<tr><td><code>checkout -b</code></td><td><code>dbgit checkout -b my-feature</code></td>
+    <td>Forks the branch you're on into a brand new one (a real, independent database) and switches
+        to it - like <code>git checkout -b</code>.</td></tr>
+<tr><td><code>checkout</code></td><td><code>dbgit checkout main</code></td>
+    <td>Switches to a branch that already exists.</td></tr>
+<tr><td><code>add</code></td><td><code>dbgit add</code> (with a statement in the DDL body box below,
+        e.g. <code>ALTER TABLE orders ADD COLUMN total INT;</code>)</td>
+    <td>Stages one schema change and applies it to your current branch right away - like
+        <code>git add</code>, but for a table definition instead of a file.</td></tr>
+<tr><td><code>commit</code></td><td><code>dbgit commit -m "add total column"</code></td>
+    <td>Folds everything you've <code>add</code>ed so far into one commit on your current branch.</td></tr>
+<tr><td><code>log</code></td><td><code>dbgit log</code></td>
+    <td>Shows your current branch's commit history, newest first, plus anything staged but not yet
+        committed.</td></tr>
+<tr><td><code>diff</code></td><td><code>dbgit diff main my-feature</code></td>
+    <td>Shows exactly what's different between two branches' schemas - which tables/columns changed,
+        and which side changed them.</td></tr>
+<tr><td><code>merge</code></td><td><code>dbgit merge my-feature</code> (run while checked out on the
+        branch you want to merge <em>into</em>)</td>
+    <td>Brings another branch's changes into your current one. Refuses if both branches changed the
+        same thing in conflicting ways.</td></tr>
+<tr><td><code>reset</code></td><td><code>dbgit reset 3</code></td>
+    <td>Takes your current branch back to an earlier commit, rebuilding its database to match.
+        Refused on <code>main</code>.</td></tr>
+<tr><td><code>help</code></td><td><code>dbgit help</code> or <code>dbgit help diff</code></td>
+    <td>Prints this same list (or detail on one command) as dbgit's own output, right in the Response
+        box below - handy if this table ever falls out of date.</td></tr>
+</table>
+</details>
+
+<label>Step 2: run a command — try <code>dbgit branch</code> to see what exists, or
+<code>dbgit checkout -b my-feature</code> to start your own branch. See the full list above for more.</label>
+<input id="command" value="dbgit branch">
+
+<label>DDL body — only used when the command above is <code>dbgit add</code>; this is the schema
+change itself, e.g. a <code>CREATE TABLE</code> or <code>ALTER TABLE</code> statement</label>
 <textarea id="body" rows="4" placeholder="CREATE TABLE orders (id INT NOT NULL);"></textarea>
 
 <button id="run">Run</button>
@@ -61,55 +157,158 @@ nothing is remembered between requests, the same way the daemon itself keeps no 
 
 <fieldset>
 <legend>Admin</legend>
+<small>Resets this whole system back to a clean first run - useful after trying things out, or if a
+branch name you want is already taken from an earlier experiment.</small>
 <select id="admin-script"><option value="clear-everything">clear-everything</option></select>
 <button id="admin-run">Run script</button>
 <pre id="admin-out"></pre>
 </fieldset>
 
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
+const DB_FIELDS = ["db-host", "db-port", "db-database", "db-user", "db-password"];
 
-function encode(value) {
-  return encodeURIComponent(value ?? "");
+async function postJson(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return response.json();
 }
 
-function buildHeader() {
-  const fields = [["author", $("author").value], ["branch", $("branch").value]];
-  if ($("db-host").value.trim()) {
-    fields.push(["db-host", $("db-host").value], ["db-port", $("db-port").value || "5432"],
-      ["db-database", $("db-database").value], ["db-user", $("db-user").value],
-      ["db-password", $("db-password").value]);
+function showUninitialized() {
+  DB_FIELDS.forEach((id) => { $(id).disabled = false; });
+  $("init-run").disabled = false;
+  $("init-run").textContent = "Initialize";
+  $("init-legend").textContent = "Step 1: point \"main\" at a database";
+  $("init-help").textContent = "Nobody has done this yet for this system, so it comes first. Fill " +
+    "in a Postgres database below and click Initialize - or just click it as-is, since these fields " +
+    "already default to the demo database this deployment set up for you. This only ever needs to " +
+    "happen once, for the whole system, not once per person.";
+  $("app").hidden = true;
+}
+
+// main's tracked db is fixed once initialized - fields go read-only, showing what it's fixed to.
+function showInitialized(db) {
+  $("db-host").value = db.host;
+  $("db-port").value = db.port;
+  $("db-database").value = db.database;
+  $("db-user").value = db.user;
+  $("db-password").value = "";
+  $("db-password").placeholder = "(hidden - already set)";
+  DB_FIELDS.forEach((id) => { $(id).disabled = true; });
+  $("init-run").disabled = true;
+  $("init-run").textContent = "Already done";
+  $("init-legend").textContent = "Step 1: done - \"main\" is set up";
+  $("init-help").textContent = `Someone already pointed main at ${db.database}@${db.host}:${db.port} ` +
+    "- that's shared by everyone using this page, so there's nothing left to do here. Skip to step 2 below.";
+  $("app").hidden = false;
+}
+
+function renderWorkspace(workspace) {
+  if (!workspace) return;
+  const el = $("workspace-status");
+  if (workspace.initialized) {
+    el.textContent = `You're '${workspace.author}', on branch '${workspace.branch}'.`;
+    el.className = "initialized";
+    showInitialized(workspace.db);
+  } else {
+    el.textContent = `You're '${workspace.author}'. This system hasn't been set up yet - do step 1 below to get started.`;
+    el.className = "uninitialized";
+    showUninitialized();
   }
-  return "DBGIT/1 " + fields.map(([k, v]) => `${k}=${encode(v)}`).join(" ");
 }
 
-async function post(path, payload, outEl) {
+// The confirmed author everything runs as - only changes via the Switch button, never just by typing
+// in the field, so a half-edited author name in the box can't accidentally get sent with a command.
+let currentAuthor = "webuser";
+try {
+  currentAuthor = localStorage.getItem("dbgit-author") || currentAuthor;
+} catch (error) {
+  // localStorage can throw (private browsing, blocked site data) - fall back to the default silently
+}
+
+async function refreshWorkspace() {
+  try {
+    const result = await fetch("/workspace/" + encodeURIComponent(currentAuthor)).then((r) => r.json());
+    renderWorkspace(result.workspace);
+  } catch (error) {
+    $("workspace-status").textContent = "Could not reach the relay: " + error;
+    $("workspace-status").className = "uninitialized";
+  }
+}
+
+function changeAuthor() {
+  const author = $("author").value.trim();
+  if (!author) {
+    alert("Type a name first, then click Switch.");
+    return;
+  }
+  currentAuthor = author;
+  $("author").value = author;
+  try {
+    localStorage.setItem("dbgit-author", author);
+  } catch (error) {
+    // best-effort persistence only; the in-memory currentAuthor still works for this page load
+  }
+  refreshWorkspace();
+}
+
+async function run(path, payload, outEl) {
   outEl.textContent = "…";
   outEl.className = "";
   try {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
+    const result = await postJson(path, payload);
     outEl.textContent = result.lines.join("\n") || (result.ok ? "(no output)" : "(failed, no message)");
     outEl.className = result.ok ? "" : "err";
+    return result;
   } catch (error) {
     outEl.textContent = "Could not reach the relay: " + error;
     outEl.className = "err";
+    return null;
   }
 }
 
-$("run").addEventListener("click", () => {
-  const command = $("command").value.trim();
-  const isAdd = /^dbgit\s+add(\s|$)/.test(command);
-  post("/run", { header: buildHeader(), command, body: isAdd ? $("body").value : null }, $("out"));
+$("author-change").addEventListener("click", changeAuthor);
+$("author").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") changeAuthor();
 });
 
-$("admin-run").addEventListener("click", () => {
-  post("/admin/run", { name: $("admin-script").value }, $("admin-out"));
+$("init-run").addEventListener("click", async () => {
+  const db = {
+    host: $("db-host").value, port: $("db-port").value, database: $("db-database").value,
+    user: $("db-user").value, password: $("db-password").value,
+  };
+  const result = await run("/init/" + encodeURIComponent(currentAuthor), { db }, $("init-out"));
+  // Once main is initialized it's fixed - reload so every field on the page (this author's included)
+  // comes back from a clean GET /workspace rather than being patched up piecemeal here.
+  if (result && result.ok) {
+    location.reload();
+  }
 });
+
+$("run").addEventListener("click", async () => {
+  const command = $("command").value.trim();
+  const isAdd = /^dbgit\s+add(\s|$)/.test(command);
+  const result = await run("/run/" + encodeURIComponent(currentAuthor), { command, body: isAdd ? $("body").value : null }, $("out"));
+  if (result) renderWorkspace(result.workspace);
+});
+
+$("admin-run").addEventListener("click", async () => {
+  const name = $("admin-script").value;
+  const result = await run("/admin/run", { name }, $("admin-out"));
+  // clear-everything untracks main and resets every branch on the daemon side - reload so this page
+  // (main's greyed-out fields included) comes back from a clean GET /workspace instead of a stale one.
+  if (result && result.ok && name === "clear-everything") {
+    location.reload();
+  }
+});
+
+$("author").value = currentAuthor;
+refreshWorkspace();
 </script>
 </body>
 </html>

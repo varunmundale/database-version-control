@@ -15,6 +15,7 @@ import org.example.service.command.CommandFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.BindException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
@@ -63,6 +64,24 @@ public final class DbGitCommandListener implements Closeable {
         return new BranchLocks(new AdvisoryBranchLock(), Duration.ofMillis(concurrency.lockTimeoutMs()));
     }
 
+    /**
+     * {@link ServerSocket}'s own {@link BindException} message ("Address already in use") says nothing about why -
+     * in practice this is almost always a second {@code dbService} already running (a manual one and a systemd one
+     * left racing for the same port is the recurring case), not a genuinely unrelated process. Naming that directly,
+     * with a command to go find it, turns "read the stack trace, guess, restart in a loop" into one obvious next
+     * step - and matters more than it looks: a systemd unit with {@code Restart=on-failure} hides this failure in a
+     * crash loop rather than surfacing it once, so the clearer the one message that does get logged, the better.
+     */
+    private static ServerSocket bind(int port) throws IOException {
+        try {
+            return new ServerSocket(port);
+        } catch (BindException exception) {
+            throw new BindException("Port " + port + " is already in use - is another dbService already running? "
+                    + "Check with 'lsof -i :" + port + "' or 'ss -tlnp | grep " + port
+                    + "', and stop it before starting this one.");
+        }
+    }
+
     public DbGitCommandListener(Forker forker, int port, ConcurrencyConfig concurrency, BranchLocks locks)
             throws IOException {
         this.context = new CommandContext(Objects.requireNonNull(forker, "forker must not be null"),
@@ -71,7 +90,7 @@ public final class DbGitCommandListener implements Closeable {
                 new RequestContext(null, null, null));
         this.commandFactory = new CommandFactory(context);
         this.concurrency = Objects.requireNonNull(concurrency, "concurrency must not be null");
-        this.serverSocket = new ServerSocket(port);
+        this.serverSocket = bind(port);
         this.handlers = new ThreadPoolExecutor(concurrency.handlerThreads(), concurrency.handlerThreads(),
                 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(concurrency.queueDepth()),
                 DbGitCommandListener::handlerThread, new RespondBusy());

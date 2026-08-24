@@ -1,17 +1,32 @@
 #!/usr/bin/env bash
 # Boots dbgit end to end, with zero required configuration: installs Docker if it isn't already
-# there, brings up a metadata Postgres on :5432 and a "production" Postgres on :5433 (what `main`
-# tracks) - reusing whatever is already listening on those ports rather than colliding with it, so
+# there, brings up a metadata Postgres on :5432, a "production" Postgres on :5433 (what `main`
+# tracks) and the branch-databases scratchpad Postgres on :55432 (what every other branch forks
+# into) - reusing whatever is already listening on those ports rather than colliding with it, so
 # this is safe to run on a machine that already has its own Postgres there - installs a JDK, builds
 # the project, and installs two systemd services: dbService (the daemon) and the HTTP relay in front
 # of it. Runs directly out of the directory it lives in; see bootstrap.sh for getting that directory
 # onto a fresh machine via git in the first place.
 #
+# The scratchpad container is provisioned here rather than left entirely to Forker/SharedContainer's
+# lazy first-fork startup (still the mechanism this uses under the hood - see ensure_postgres, which
+# is the same "reuse what's running, else start what exists, else create fresh" dance either way): a
+# machine that has ever run `docker context use` away from the daemon socket `sudo docker` resolves
+# to - Docker Desktop being the common case - would otherwise have the daemon's own later `docker run`
+# call (unprivileged, using whatever context is "current" for whichever user runs it) silently target
+# a *different* Docker than the one this script just used, so the very first fork fails to find a
+# scratchpad container that was never actually missing - it's just in a daemon nothing else is using.
+# Provisioning it here, via the same `sudo docker` every other container in this script uses, removes
+# that race entirely for the deployment this script sets up. (On a machine where Docker Desktop is
+# what you actually want dbgit to use, don't install a second system dockerd at all - point this
+# script's `docker` resolution at Desktop yourself before running it, e.g. by not having docker.io
+# installed and instead giving the invoking user's own `docker` context precedence; this script always
+# runs container commands via `sudo docker`, which follows root's own context, not the invoking user's.)
+#
 # Deliberately does NOT write dbgit.json: the version already checked into the repo
 # (src/main/resources/dbgit.json) already points at exactly localhost:5432/postgres:postgres for the
-# metadata store and the postgresql dialect for branch databases (which is what needs the scratchpad
-# container on :55432 - dbgit brings that up itself, the moment something forks a branch; see
-# Forker/SharedContainer). Nothing here needs to be templated, so nothing is required as input.
+# metadata store, localhost:55432 for the scratchpad and the postgresql dialect for branch databases.
+# Nothing here needs to be templated, so nothing is required as input.
 #
 #   ./scripts/deploy/setup.sh              # everything, from a clean machine or this one
 #   ./scripts/deploy/setup.sh clean        # tears down every container/service/file this script made
@@ -26,6 +41,10 @@ META_CONTAINER="${META_CONTAINER:-dbgit-metadata}"
 META_PORT="${META_PORT:-5432}"
 PROD_CONTAINER="${PROD_CONTAINER:-dbgit-production-db}"
 PROD_PORT="${PROD_PORT:-5433}"
+# Must match branchDatabases.containerName/hostPort in src/main/resources/dbgit.json - not overridable
+# the way the other two are, since dbgit.json is checked in unchanged and isn't templated by this script.
+BRANCH_CONTAINER="postgres-branches-scratchpad"
+BRANCH_PORT="55432"
 PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
 
 INSTALL_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -68,12 +87,11 @@ teardown() {
     sudo systemctl disable --now dbgit-daemon.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/dbgit-daemon.service /etc/systemd/system/dbgit-relay.service
     sudo systemctl daemon-reload 2>/dev/null || true
-    for c in "$META_CONTAINER" "$PROD_CONTAINER"; do
+    for c in "$META_CONTAINER" "$PROD_CONTAINER" "$BRANCH_CONTAINER"; do
         sudo docker rm -f "$c" >/dev/null 2>&1 && echo "removed container $c" || true
     done
     sudo rm -rf /etc/dbgit "$INSTALL_DIR/.dbgit" "$INSTALL_DIR/target"
-    echo "Done. The scratchpad container (postgres-branches-scratchpad, if dbgit ever created one)"
-    echo "and the JDK/Docker installs themselves are left alone - re-run without 'clean' to redeploy."
+    echo "Done. The JDK/Docker installs themselves are left alone - re-run without 'clean' to redeploy."
 }
 
 if [ "${1:-}" = "clean" ]; then
@@ -91,9 +109,11 @@ else
 fi
 
 echo
-echo "=== 2/6: metadata Postgres (:$META_PORT) and production Postgres (:$PROD_PORT, what 'main' tracks) ==="
+echo "=== 2/6: metadata Postgres (:$META_PORT), production Postgres (:$PROD_PORT, what 'main' tracks),"
+echo "         and the branch-databases scratchpad (:$BRANCH_PORT, what every other branch forks into) ==="
 ensure_postgres "$META_CONTAINER" "$META_PORT"
 ensure_postgres "$PROD_CONTAINER" "$PROD_PORT"
+ensure_postgres "$BRANCH_CONTAINER" "$BRANCH_PORT"
 
 echo
 echo "=== 3/6: swap (small free-tier VMs are short on RAM for a Maven build) ==="
@@ -160,6 +180,7 @@ ExecStart=/usr/bin/python3 ${INSTALL_DIR}/scripts/deploy/relay.py \
     --relay-port ${RELAY_PORT} --dbgit-port ${SERVICE_PORT} \
     --web-dir ${INSTALL_DIR}/scripts/deploy/web \
     --repo-dir ${INSTALL_DIR} \
+    --state-file /etc/dbgit/web-workspaces.json \
     --daemon-service dbgit-daemon.service
 Restart=on-failure
 RestartSec=5
@@ -201,6 +222,7 @@ echo "dbService  : sudo systemctl status dbgit-daemon   (journalctl -u dbgit-dae
 echo "relay      : sudo systemctl status dbgit-relay    (journalctl -u dbgit-relay -f to tail)"
 echo "web client : http://<this machine's address>:${RELAY_PORT}/"
 echo "main tracks: localhost:${PROD_PORT}/postgres (the '${PROD_CONTAINER}' container)"
+echo "scratchpad : localhost:${BRANCH_PORT} (the '${BRANCH_CONTAINER}' container) - every forked branch lives here"
 echo
 echo "On GCP, :${RELAY_PORT} is closed by default - open it once per project/VM tag from a machine"
 echo "with gcloud authenticated (not from here):"

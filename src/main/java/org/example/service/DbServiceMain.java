@@ -18,7 +18,17 @@ public final class DbServiceMain {
 
     public static void main(String[] args) throws IOException {
         int port = ServiceEndpointConfig.getInstance().port();
-        try (DbGitCommandListener listener = new DbGitCommandListener(port)) {
+        DbGitCommandListener listener;
+        try {
+            listener = new DbGitCommandListener(port);
+        } catch (IOException exception) {
+            // Logged here, not left to whatever prints the propagating exception: 'mvn exec:java' wraps it in its
+            // own MojoExecutionException noise, and a systemd unit with Restart=on-failure would otherwise hide it
+            // in a crash loop instead of saying once, clearly, why this attempt failed.
+            LOG.error("Could not start dbService: {}", exception.getMessage());
+            throw exception;
+        }
+        try (listener) {
             LOG.info("dbService listening on port {}", listener.port());
             listener.serve();
         } finally {
