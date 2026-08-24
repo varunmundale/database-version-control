@@ -1,11 +1,32 @@
 # dbgit
 
-Git for your database schema — with a real database behind every branch.
+**dbgit is Git for your database schema.**
 
-## What it is
+Every branch is a real, independent database, forked in seconds and rebuilt from history whenever it
+needs to be, not a diff you have to imagine. Point `main` at your
+real production or staging database and everything else forks safely off it. Stage a change, commit
+it, and `diff` shows you exactly what moved, right down to the column and constraint, even through a
+rename. `merge` brings a branch back in the way git does — flagging a genuine conflict only when both
+sides actually changed the same thing — and rehearses the whole merge on a throwaway database before
+it ever touches yours. And because `dbgit` models the schema itself rather than just running whatever
+you hand it, a statement it can't faithfully represent is rejected the moment you type it, not
+discovered three merges later.
 
-Your application code has branches, history, diffs and merges. Your schema usually has a folder of
-migration scripts and a convention about who is allowed to run them. `dbgit` closes that gap.
+It has real multi-user support, not just single-laptop use: a whole team can work at once, with real
+concurrency, and no one can corrupt another's branch. And it's multi-dialect: PostgreSQL, MySQL or
+in-memory H2, same commands and same model either way.
+
+## Try it!
+
+**Live, in your browser — no install:** **http://34.41.100.92:8080/**
+
+- **Initialize** points the shared `main` at whatever database you want it to track — it's a
+  workspace setup step, not per-author, so the first person to run it sets it for everyone until it's
+  changed.
+- **Run script → clear-everything** wipes every branch, commit and forked database back to a blank
+  slate. Use it to reset the instance if it gets messy — rest of the page is self-serve.
+
+**Or locally, once `dbService` is running** (see [Install and run](#install-and-run) below):
 
 ```bash
 ./dbgit checkout -b add-invoices                     # a real, private database, forked in seconds
@@ -15,430 +36,107 @@ echo "CREATE TABLE invoices (id SERIAL, total NUMERIC(10,2));" | ./dbgit add
 ./dbgit merge add-invoices                           # bring it back, or be told exactly why not
 ```
 
-`checkout -b` doesn't create a file. It creates a **running database** — an independent PostgreSQL
-(or MySQL, or in-memory H2) database, built by replaying that branch's history from the beginning.
-You can connect to it, break it, load data into it, point your app at it, and throw it away. Every
-developer gets their own; nobody waits for the shared staging box.
+## How this compares
 
-## Why it's different
+Liquibase and Flyway apply an ordered list of scripts and hope everyone ran them in the same order;
+Dolt versions your actual data, by replacing your database engine with its own. `dbgit` versions
+*schema*, the way git versions code — branches, diffs, real three-way merges — while your data stays
+in the PostgreSQL/MySQL you already run.
 
-**A branch is a database, not a diff.** Schema-diff tools compare two databases after the fact.
-Migration frameworks give you an ordered list of scripts and hope everyone ran them. `dbgit` gives
-each branch its own live database and rebuilds it from history whenever it needs to — so "what does
-this branch's schema actually look like?" is answered by a database you can query, not by reading
-files and guessing.
+| | Liquibase / Flyway | Dolt | dbgit |
+|---|---|---|---|
+| Unit of version control | An ordered migration script, tracked in a table | Every row | Schema DDL |
+| Branching | None — divergence is a human problem, resolved in the scripts themselves | A branch is data, in Dolt's own storage engine | A branch is a real, forked database |
+| Merging | None | Row-level, built in | Column/constraint/index-level, three-way judged, rehearsed before it touches anything real |
+| Your database | Runs scripts against it; doesn't model what's inside | *Is* the database — you migrate onto Dolt's engine | Runs alongside your existing PostgreSQL/MySQL/H2, unmodified |
 
-**History is the source of truth, so branches are reproducible.** `dbgit` never introspects a
-database to learn what's in it. A schema is only ever what its recorded DDL says it is, which is why
-forking a branch, merging one, and rolling one back with `reset` all reduce to the same reliable
-operation: replay this history into an empty database. There is no drift to reconcile, because
-there is nothing to reconcile against.
+### Under the hood
 
-**Merges that understand renames.** Every table and column carries a stable identity that survives
-being renamed. `ALTER TABLE users RENAME COLUMN email TO contact_email` reads as *one column that
-moved* — not as one column vanishing and another appearing — and an index over that column follows
-it automatically.
+- **History is the only source of truth.** `dbgit` never introspects a database — fork, merge and
+  `reset` all reduce to "replay this history," so there's no drift to reconcile.
+- **Every table and column has a stable identity that survives a rename.** `RENAME COLUMN` reads as
+  one column that moved, not a drop and an add — its indexes and constraints follow automatically.
+- **Conflicts are judged three ways.** Two branches describing something differently isn't
+  automatically a conflict — only if both diverged from what they last shared. `dbgit` shows you
+  exactly which column, constraint or index, with both sides' statements side by side.
+- **A merge is rehearsed before it's real.** Every merge replays into a throwaway staging database
+  first; only a successful rehearsal ever touches your branch.
+- **Branch mutations are lock-serialized.** A fixed lock order means even two merges going opposite
+  directions can't deadlock or corrupt anything.
 
-**Conflicts judged three ways, like git.** Two branches describing a column differently isn't a
-conflict; it's usually one branch not having caught up yet. `dbgit` replays the history the two
-branches *share* and asks which side actually moved the column. Only if both did is the merge
-refused — and it tells you which column, which constraint, which index, with both sides' statements
-side by side. Write the statement that resolves it and the merge goes through.
+## How it works
 
-**A merge is rehearsed before it touches anything real.** Every merge first forks a throwaway
-staging database and replays the incoming changes there. Only once that succeeds for real does it
-touch your branch's database — and the staging branch is cleaned up either way.
+One daemon (`dbService`) serves every client — the CLI and a browser, via a thin HTTP relay — over a
+wire protocol that carries the caller's identity and branch on every request, so the server itself
+holds no per-user state. Every mutating command produces two effects that have to agree: an in-memory
+replay (what `add` validates against, what `diff`/`merge` compare) and a real write, to `dbgit`'s own
+metadata store and to the branch's actual database.
 
-**Bad DDL is caught before it reaches the database.** `dbgit add` parses and validates every
-statement against the dialect you configured, so a MySQL-only statement on a Postgres branch is
-rejected at the point you typed it. And anything `dbgit` cannot faithfully model — an inline
-`PRIMARY KEY` in a `CREATE TABLE`, say — is refused with the statement to write instead, rather than
-silently accepted and quietly invisible to every later diff.
-
-**Built for a team, not one laptop.** `dbgit` runs as a daemon serving many people at once. It keeps
-no per-user state of its own — each client carries its own branch and credentials — and every
-operation that changes a branch is serialized through a database-level lock, taken in a fixed order
-so that two people merging in opposite directions can't deadlock each other. Reads never wait for
-writes. An operation that fails halfway cleans up after itself instead of leaving a half-built
-branch behind.
-
-**One branch is not a scratchpad.** `main` tracks a real, pre-existing database you point it at with
-`dbgit init` — your actual production or staging schema. Everything else forks. Credentials for it
-stay in your own workspace and are never written to shared storage.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    CLI["dbgit CLI"] -- "dbgit &lt;command&gt;\n+ header (author, branch, db-*)" --> Daemon
-    WebUI["Web UI"] -- HTTP --> Gateway["relay.py\n(API gateway)"] -- "dbgit &lt;command&gt;\n+ header (author, branch, db-*)" --> Daemon
-
-    Daemon["dbService daemon"] --> Meta[("metadata DB\nPostgreSQL")]
-    Daemon --> MainDB[("main\ntracked DB")]
-    Daemon --> Scratchpad
-
-    subgraph Scratchpad["Docker scratchpad container"]
-        direction TB
-        B1[("branch: feature-x")]
-        B2[("branch: feature-y")]
-    end
-```
-
-One daemon, many clients, no per-user state on the server: every socket carries one plain-text header
-line (`author=... branch=... db-host=...`, percent-encoded, protocol tag `DBGIT/1`) in front of the
-same command line the CLI prints, e.g. `DBGIT/1 author=varun branch=feature/orders db-host=localhost
-db-port=5432 db-database=app db-user=varun db-password=s3cret` followed by `checkout -b feature/orders`
-on the next line — so nothing about who's asking or which branch lives on the server between requests.
-The metadata DB is the only source of truth for what branches and commits exist; every branch database
-(`main`'s tracked one included) is rebuilt from it by replay, never read back into it. The web UI never
-talks to the daemon directly — `relay.py` is a thin HTTP-to-TCP gateway in front of it, translating a
-JSON POST into that same header-plus-command-line shape, since a browser can't open a raw socket.
-
-## How a command runs
-
-Every mutating command produces two effects that have to agree: an **in-memory replay** — what makes
-`add` reject bad DDL up front, and what `diff`/`merge` compare — and a **real write**, split into the
-metadata DB (bookkeeping rows: branches, commits, changesets) and the branch's actual database (real
-DDL). A branch database is never read back into the model; the model only ever comes from replaying
-recorded DDL.
-
-```mermaid
-flowchart TB
-    CMD["Command\n(AddCommand, CommitCommand, CheckoutCommand,\nDiffCommand, MergeCommand, ResetCommand, ...)"]
-    CMD --> OP["core operation\n(Stager, Committer, Forker, Differ, Merger, Resetter)"]
-
-    OP -- "replay committed + staged DDL" --> REPLAY["Replayer\nbuilds an in-memory TableModel\n(validates 'add', powers 'diff' / 'merge')"]
-    OP -- "read / write rows" --> METAREPO["metadata repositories\n(BranchMetadata · Commit · Changeset)"]
-    OP -- "run real DDL" --> DBREPO["BranchDatabaseRepository"]
-
-    METAREPO --> METADB[("metadata DB\nbranches · commits · changesets")]
-    DBREPO --> BRANCHDB[("branch database\nPostgres / MySQL / H2")]
-```
-
-Concretely, forking a branch, staging a change and committing it — `checkout -b`, `add`, `commit` —
-looks like this:
-
-```mermaid
-sequenceDiagram
-    participant Cli as dbgit CLI
-    participant Daemon
-    participant Meta as metadata DB
-    participant BDB as branch DB
-
-    Cli->>Daemon: checkout -b feature   (branch=main)
-    Daemon->>Meta: createBranch(feature, head = main's HEAD commit)
-    Daemon->>BDB: CREATE DATABASE feature_pg
-    Daemon->>Meta: read feature's committed history
-    Daemon->>BDB: replay every commit's DDL, one transaction
-    Daemon-->>Cli: OK - switched to feature
-
-    Cli->>Daemon: add "ALTER TABLE orders ADD COLUMN total ..."   (branch=feature)
-    Daemon->>Daemon: replay feature's history + this statement in memory (validates it)
-    Daemon->>Meta: insert changeset, status PENDING
-    Daemon->>BDB: run the ALTER TABLE for real
-    Daemon->>Meta: mark changeset APPLIED
-    Daemon-->>Cli: OK - 1 column added
-
-    Cli->>Daemon: commit -m "add total"   (branch=feature)
-    Daemon->>Meta: read feature's APPLIED changesets
-    Daemon->>Meta: insert commit row, parent = feature's HEAD
-    Daemon->>Meta: mark those changesets COMMIT
-    Daemon->>Meta: compare-and-set feature HEAD -> new commit
-    Daemon-->>Cli: OK - commit #N
-```
-
-The remaining commands are the same two effects in different order:
-
-- **`diff a b`** (`Differ`) replays `a`'s history, `b`'s history, and the history they *share* — all
-  three in memory, nothing touches a real database. Anything that differs between `a` and `b` but
-  matches the shared ancestor is one side catching up; anything that differs from the ancestor on
-  *both* sides is a conflict.
-- **`merge b`** (`Merger`) runs that same `Differ` first. If nothing conflicts, it forks a throwaway
-  staging branch and replays only `b`'s exclusive statements there for real — a rehearsal. Only once
-  that succeeds does it replay the same statements against the target's real branch database, then
-  writes one merge commit with both branches as parents, then drops the staging branch either way.
-- **`reset <commit>`** (`Resetter`) replays the truncated history in memory first, so a broken history
-  fails before anything is touched. Then, in one metadata transaction, it moves HEAD back and deletes
-  the working set; only then — the one step that can't be transactional — does it drop and rebuild the
-  real branch database from that same truncated history.
-
-## Command summary
-
-- `dbgit init` — point `main` at the real database it tracks
-- `dbgit checkout -b <branch>` — fork a real, independent database from the current branch's history
-- `dbgit add` — stage one DDL statement (from stdin) and apply it to the branch's live database
-- `dbgit commit -m <message>` — fold staged changes into the branch's history
-- `dbgit diff <a> <b>` — compare two branches, table by table and column by column
-- `dbgit log` — a branch's commits, plus whatever is staged but uncommitted
-- `dbgit merge <branch>` — merge another branch in, refusing genuine conflicts
-- `dbgit reset <commit>` — take a branch back to a commit, rebuilding its database
-- `dbgit branch` — list branches
-
-Works against PostgreSQL, MySQL, or in-memory H2 branch databases — same commands, same model.
+Diagrams and a full request-by-request walkthrough: [`docs/architecture.md`](docs/architecture.md).
 
 ## What's supported
 
-### SQL statements `dbgit add` accepts
+`dbgit` models a schema itself, so it accepts a deliberately small, precisely defined set of DDL —
+`CREATE`/`DROP`/`RENAME TABLE`, column add/drop/rename/retype, constraints, indexes — against
+PostgreSQL, MySQL or in-memory H2 branch databases, same commands and same model either way. Anything
+it can't faithfully model (an inline `PRIMARY KEY`, `CHECK`, conditional DDL, ...) is refused at
+`dbgit add` time with the statement to write instead, rather than silently accepted and invisible to
+every later diff.
 
-`dbgit` models a schema itself, so it accepts a deliberately small, precisely defined set of DDL.
-Everything below is parsed into the internal model, replayed on every fork, and understood by `diff`
-and `merge`. Anything not on this list is rejected at `dbgit add` time, before it reaches a database.
+Full accepted/rejected statement tables, dialect notes and what's easy vs. hard to extend:
+[`docs/ddl-reference.md`](docs/ddl-reference.md).
 
-| Statement | PostgreSQL / H2 | MySQL |
+## Requirements
+
+| Tool | Version | Needed for |
 |---|---|---|
-| Create a table (columns only) | `CREATE TABLE t (c1 …, c2 …)` | same |
-| Drop a table | `DROP TABLE t` | same |
-| Rename a table | `ALTER TABLE t RENAME TO u` | same — MySQL's own `RENAME TABLE t TO u` is not accepted; write it as `ALTER TABLE` |
-| Add a column | `ALTER TABLE t ADD COLUMN c <type> …` | same |
-| Drop a column | `ALTER TABLE t DROP COLUMN c` | same |
-| Rename a column | `ALTER TABLE t RENAME COLUMN a TO b` | same |
-| Change a column's type | `ALTER TABLE t ALTER COLUMN c TYPE <type>` (a trailing `USING <expr>` is accepted and ignored) | `ALTER TABLE t MODIFY COLUMN c <type>` |
-| Add a constraint | `ALTER TABLE t ADD CONSTRAINT n PRIMARY KEY (…)` / `UNIQUE (…)` / `FOREIGN KEY (…) REFERENCES …` | same |
-| Drop a constraint | `ALTER TABLE t DROP CONSTRAINT n` | same |
-| Create an index | `CREATE [UNIQUE] INDEX n ON t (c1, c2)` | same |
+| Java | 25 (LTS) or newer | Building and running everything (`pom.xml` targets Java 25). |
+| Maven | 3.9.x or newer | The build — there's no packaged jar; `mvn` is how you build, test and run. |
+| Docker | 24.x or newer | `postgresql`/`mysql` branch-database dialects and integration tests. Not needed on `h2`. |
+| PostgreSQL | 13+ | `dbgit`'s own metadata store, regardless of which dialect branch databases use. |
 
-A table rename is **tracked as a rename**, not read back as a drop plus an add: the table keeps its
-identity across the statement, so `dbgit diff` shows one table whose name differs, and every column,
-constraint and index it carries survives untouched. `dbgit merge` can therefore bring in a one-sided
-rename cleanly, and reports a genuine conflict — both branches renamed the same table — as a
-table-level conflict, the same way it already does for a column.
+Everything else (jOOQ, JSqlParser, Jackson, JDBC drivers, JUnit 5) is pinned in `pom.xml`.
 
-Inside a column definition, `NOT NULL`, `DEFAULT <value>` and the dialect's identity spelling
-(`GENERATED ALWAYS/BY DEFAULT AS IDENTITY` on PostgreSQL, `AUTO_INCREMENT` on MySQL, either on H2)
-are all understood and tracked. `SERIAL` and friends are just types, and pass through as written.
-
-Each dialect's parser is **strict to its own dialect**: a MySQL `MODIFY COLUMN` on a PostgreSQL
-branch is rejected when you type it, rather than accepted and left to fail later during a fork or a
-merge.
-
-### What is deliberately rejected, and why
-
-| Rejected | Reason |
-|---|---|
-| A constraint declared inside `CREATE TABLE` — inline (`id INT PRIMARY KEY`, `email TEXT UNIQUE`, `… REFERENCES other(id)`) or table-level (`, PRIMARY KEY (id)`) | These used to be silently ignored: the constraint existed in the real database but not in the model, invisible to `diff` and missing from every later fork. The error names the `ALTER TABLE … ADD CONSTRAINT` to write instead. |
-| `CHECK` constraints | Not modelled — there is nowhere in `ConstraintType` for them to live. |
-| `DROP INDEX` (in any spelling) | An index name carries no table, and `dbgit` rebuilds a schema by replaying history one table at a time, so it cannot tell whose index it was. Drop the constraint that owns it instead. |
-| `IF EXISTS` / `IF NOT EXISTS`, on any statement | A statement must mean the same thing every time it is replayed. A conditional clause means one thing on a branch that has the object and nothing on one that does not. |
-| `DROP TABLE … CASCADE` | Can silently drop constraints on *other* tables that replay never sees and `dbgit diff` can never report. Drop the referencing constraint first. |
-| `DROP TABLE` naming several tables at once, or a `TEMPORARY` table | Not modelled. |
-| Index types other than plain and `UNIQUE` | Not modelled. |
-| Several changes in one `ALTER TABLE` (`ADD a INT, ADD b INT`) | One statement, one change — that is the unit a changeset, a diff and a conflict are all expressed in. Write them as two. |
-| `RENAME TABLE t TO u` (MySQL's own spelling) | `ALTER TABLE t RENAME TO u` covers every dialect, so only that form is accepted. |
-| Views, sequences, triggers, functions, stored procedures, schemas other than `public` | Not modelled yet. See "extending" below. |
-| Any DML (`INSERT`, `UPDATE`, `DELETE`), and data generally | Out of scope: `dbgit` versions schema. Load data into a branch's database directly — it is a normal database. |
-
-### Databases
-
-| Role | Supported | Notes |
-|---|---|---|
-| **Branch databases** (what your schema actually lives in) | PostgreSQL, MySQL, H2 | Set `branchDatabases.dialect` in `dbgit.json`. PostgreSQL and MySQL run in a shared Docker container `dbgit` manages; H2 is in-memory inside the daemon and needs no Docker at all. |
-| **The database `main` tracks** | Same dialect as above | A real, pre-existing database you point at with `dbgit init`. |
-| **`dbgit`'s own metadata store** | PostgreSQL only | Not configurable. It uses jOOQ pinned to the Postgres dialect, Postgres DDL, and Postgres advisory locks for branch locking. |
-
-### Easy to extend
-
-These are the seams the design already has. Each is a small, local change:
-
-- **Another SQL dialect.** Two halves, registered together in `ConnectorRegistry`: a `JdbcConnections`
-  that builds that vendor's URL, and a `SqlConnector` that runs raw SQL. Then a `DialectGrammar` value
-  — how it spells a retype and what its identity columns look like — registered in
-  `DdlParserRegistry`. Add a `ContainerSpec` if branch databases for it should run in Docker; omit it
-  (as H2 does) if they should not. No existing logic changes.
-- **Another DDL statement that edits one table.** Add a `SchemaOperation` variant, a branch in
-  `SqlDdlParser`, and the matching edit in `SchemaOperationApplier`. Everything downstream — replay,
-  fork, diff, merge, reset — picks it up for free, because they all work in terms of the model rather
-  than the SQL. `DROP TABLE`/`RENAME TO` are the one exception worth knowing about: they're the first
-  two operations whose effect is on the schema as a whole rather than on a single table, so they also
-  needed `Replayer.apply(Map, String)` (to move the map key) and `DatabaseDiff` matching tables by
-  stable id (to make a rename read as a rename) rather than by name.
-- **`CHECK` constraints.** A `ConstraintType` value plus somewhere on `ConstraintModel` to keep the
-  expression.
-- **Constraint or index renames tracked as renames.** Tables and columns already carry a stable
-  identity through a rename; a constraint's or index's own identity is still just its name, so
-  renaming one reads as a drop plus an add. Giving them the same treatment is the same mechanism
-  applied once more.
-- **Another command.** One `Command` subclass and one line in `CommandFactory`. Commands run against
-  a `CommandContext` rebuilt per request, so nothing else needs to know.
-- **Different concurrency limits.** Thread count, queue depth, socket, drain and lock timeouts are all
-  in `dbgit.json` under `concurrency`.
-
-### Harder — these need real design first
-
-- **Versioning data alongside schema.** Row-level conflicts are a different problem.
-- **Replaying a merge against a renamed table or column.** A merge replays the incoming branch's raw
-  DDL text, so a statement naming a table or column the target has since renamed will not apply — it
-  fails in the merge's staging branch, before the target's own database is touched, so nothing is
-  corrupted, but the merge still has to be resolved by hand. Resolvable today by compensating on the
-  renaming side; a real fix means replaying resolved operations rather than text.
-- **A metadata store that is not PostgreSQL**, or one that is not a single point of failure.
-- **Very long histories.** A fork replays the whole history, so fork time grows with it. The answer is
-  snapshot/compaction commits, not introspection.
-- **A foreign key's target resolved by id rather than by name.** `SchemaOperationApplier` resolves an
-  FK's referenced table from the name written in the DDL, not from a lookup — cheap, and correct for
-  every FK added before its target is ever renamed, but one added after a rename won't derive the
-  target's real id.
-
-## Recommended versions
-
-Built and tested with:
-
-| Tool                | Recommended     | Notes                                                                 |
-|---------------------|-----------------|------------------------------------------------------------------------|
-| Java                | 25 (LTS) or newer | `pom.xml` targets Java 25 language features; the build will not compile on an older JDK. |
-| Maven               | 3.9.x or newer  | 3.8+ works; the project has no packaged jar, so `mvn` is how you build, test and run it. |
-| Docker              | 24.x or newer   | Only needed for the `postgresql`/`mysql` branch-database dialects and the integration test suite (via Testcontainers); not needed if you run entirely on the `h2` dialect. |
-| PostgreSQL (server) | 13+             | Required as `dbgit`'s own metadata store (bookkeeping tables), regardless of which dialect branch databases use. |
-
-Everything else (jOOQ, JSqlParser, Jackson, the JDBC drivers, JUnit 5) is pinned in `pom.xml` and
-fetched by Maven — nothing else needs to be installed by hand.
-
-## Installation (from git)
+## Install and run
 
 ```bash
 git clone git@github.com:varunmundale/database-version-control.git
 cd database-version-control
-mvn compile
-```
+mvn compile                 # or just let the first run of ./dbgit / ./dbService pull what they need
 
-`dbgit` has no packaged-jar workflow — `./dbgit` and `./dbService` are thin wrappers around
-`mvn exec:java`, so `mvn compile` (or just letting the first run of either script pull what it
-needs) is all "installing" it means.
+./dbService                 # start the daemon; leave it running in its own terminal
 
-### Prerequisites before running it
-
-1. **A metadata-store PostgreSQL server**, reachable and already running (e.g. `localhost:5432`).
-   This is where `dbgit` keeps its own branch/commit/changeset bookkeeping — it is separate from any
-   database your schemas actually live in. Configure it under `metadata` in
-   `src/main/resources/dbgit.json`.
-2. **Docker**, running and reachable via the `docker` CLI, if `branchDatabases.dialect` in
-   `dbgit.json` is `postgresql` or `mysql` — a shared container is created/reused to host every
-   branch's forked database. Not needed for the `h2` dialect, since an in-memory H2 database lives
-   inside the daemon's own JVM.
-
-(Optional) run the test suite to confirm everything is wired up correctly:
-
-```bash
-mvn test                          # unit tests only
-mvn test -Dtest='*IntegrationTest' # + integration tests (needs Docker)
-```
-
-## Usage
-
-`dbgit` is client/server: start the daemon once, then send it commands from any workspace directory.
-
-### 1. Start the daemon
-
-```bash
-./dbService
-```
-
-Binds to the port configured in `dbgit.json` (`service.port`) and blocks, serving commands. Leave
-it running in its own terminal.
-
-### 2. Point `main` at a real database (once per workspace)
-
-```bash
+# in another terminal, once per workspace: point 'main' at a real, already-existing database
 ./dbgit init --host <host> --port <port> --database <database> --user <user> --password <password> --author "<your name>"
-```
 
-`--author` is required: it becomes this workspace's commit identity, stored in `.dbgit/config.json`.
-Idempotent — re-running it against the same target just refreshes the stored connection; pointing
-it at a different target repoints `main` while keeping its commit history. Until this is run,
-commands touching `main` will say so and refuse.
-
-### 3. Everyday commands
-
-Run these from the same working directory you ran `dbgit init` from — it holds `.dbgit/HEAD` (which
-branch you're on) and `.dbgit/config.json` (how to reach `main`'s database).
-
-```bash
-# create and switch to a new branch, forked from the current one's database
-./dbgit checkout -b feature/add-total-column
-
-# stage a DDL statement (read from stdin, so it can span multiple lines)
+./dbgit checkout -b add-invoices
 echo "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);" | ./dbgit add
+./dbgit commit -m "add total column"
+./dbgit diff main add-invoices
+./dbgit merge add-invoices
 
-# fold staged changes into a new commit
-./dbgit commit -m "add total column to orders"
-
-# switch branches
-./dbgit checkout main
-
-# see what's changed between two branches
-./dbgit diff main feature/add-total-column
-
-# see a branch's commit history (plus anything staged but not committed)
-./dbgit log
-
-# list all branches; '*' marks the current one
-./dbgit branch
-
-# merge a branch in, failing on any conflicting change
-./dbgit merge feature/add-total-column
-
-# roll a branch back to an earlier commit, rebuilding its database
-./dbgit reset 3
-
-# full command reference
-./dbgit help
-./dbgit help <command>
+./dbgit help                # full command reference, straight from the code
 ```
 
-### Command reference
+A PostgreSQL server for the metadata store must already be reachable (configured under `metadata` in
+`src/main/resources/dbgit.json`); Docker must be running if `branchDatabases.dialect` is `postgresql`
+or `mysql`. `mvn test` runs unit tests; `mvn test -Dtest='*IntegrationTest'` adds integration tests
+(needs Docker).
 
-| Command | Synopsis | What it does |
-|---|---|---|
-| `init` | `dbgit init --host <host> --port <port> --database <database> --user <user> --password <password> --author <name>` | Points `main` at a real, already-existing database it tracks. |
-| `checkout` | `dbgit checkout <branch>` / `dbgit checkout -b <branch>` | Switches branches, or forks the current branch's database into a new one. |
-| `add` | `dbgit add <DDL statement (via stdin)>` | Stages one DDL statement and applies it to the current branch's live database. |
-| `commit` | `dbgit commit [-m <message>]` | Folds the current branch's applied changesets into one new commit. |
-| `branch` | `dbgit branch` | Lists every known branch. |
-| `log` | `dbgit log` | Prints the current branch's commits, newest first, plus what's staged. |
-| `reset` | `dbgit reset <commit>` | Takes the current branch back to a commit, rebuilding its database. Refused for `main`. |
-| `diff` | `dbgit diff <branch1> <branch2>` | Compares two branches' schemas. |
-| `merge` | `dbgit merge <branch>` | Merges another branch into the current one, failing on conflicts. |
-| `help` | `dbgit help [<command>]` | Lists every command's usage, or describes one in detail. |
-
-### Runnable walkthroughs
-
-`scripts/smoke-tests/` has end-to-end scripts you can run against a live daemon (from the repo root,
-e.g. `./scripts/smoke-tests/scratch_scripts.sh`) that exercise these workflows directly: basic
-branching, conflicting and non-conflicting merges, constraints/indexes, `DROP TABLE`/
-`RENAME TO` (`table-commands-demo.sh`), `log`/`reset`, and (`concurrency-*-test.sh`) the daemon's
-concurrency guarantees. `table-commands-demo.sh` and `constraints-rejected-demo.sh` *assert*: each
-exits non-zero if dbgit ever accepts a form it should refuse.
-
-`scripts/live-demo-eof.sh` sits outside that directory: it is the walkthrough to *watch* rather than
-a check to run - one story told end to end, from two branches diverging to a conflict and the two
-ways of resolving it. (`scripts/live-demo.sh` is the same story as raw notes, not runnable as a
-script.)
-
-`scripts/live-demo-concurrency.sh` is the branch-lock demo, in the same spirit. It only prepares the
-ground - a branch whose table holds a few million rows - and then prints the commands to type in two
-terminals: five `dbgit add`s racing for one column, of which exactly one wins, and a real migration - a CREATE INDEX over millions of rows - holding its branch for as long as
-PostgreSQL needs while reads of the same branch answer straight through. What each act proves,
-and what to say while it runs, is in `scripts/live-demo-concurrency.md`.
+`scripts/smoke-tests/` has end-to-end scripts you can run against a live daemon; `scripts/live-demo-eof.sh`
+is a full story — two branches diverging, a merge, a conflict resolved two ways — meant to be watched
+rather than checked.
 
 ## Deploying it as a service
 
-For running `dbgit` somewhere other than a laptop, with a browser UI in front of it instead of the CLI:
+The hosted instance linked in [Try it!](#try-it) above runs this way — a browser client
+(`scripts/deploy/web/index.html`) served by `relay.py`, a thin HTTP-to-TCP bridge in front of the same
+daemon and wire protocol described in [`docs/architecture.md`](docs/architecture.md), behind two
+systemd services. To run your own instance:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/varunmundale/database-version-control/master/scripts/deploy/bootstrap.sh | bash
 ```
 
-One command, no configuration required. `bootstrap.sh` clones the repo onto the machine; `setup.sh`
-then installs Docker, brings up three Postgres containers (the metadata store, the database `main`
-tracks, and the branch-fork scratchpad), installs a JDK, builds the project, and installs two systemd
-services — `dbgit-daemon` (`dbService`) and `dbgit-relay`, an HTTP-to-TCP bridge
-(`scripts/deploy/relay.py`) that lets a browser speak `dbgit`'s raw-TCP protocol, since a browser can't
-open a raw socket itself. Visiting `http://<vm>:8080/` opens `scripts/deploy/web/index.html`, a browser
-client for the same commands the CLI sends: each visitor gets their own branch/author identity, and
-`main`'s tracked connection is shared across all of them, set up once through the UI's own init step.
-
-Re-run `bootstrap.sh` any time to redeploy the latest `master`. `./scripts/deploy/setup.sh clean` tears
-down everything it created (containers, services, build output) without touching the Docker/JDK
-installs themselves.
-
-This sits in front of the same daemon and wire protocol described above — the relay doesn't change how
-`dbgit` works, it just gives a browser a way to reach it.
+One command: installs Docker, Postgres, a JDK, builds the project, and runs `dbService` plus a browser
+UI behind two systemd services. Details and redeploy/teardown: [`docs/deploying.md`](docs/deploying.md).

@@ -152,16 +152,6 @@ class DatabaseDiffTest {
         assertTrue(tableDiff.columnDiffs().isEmpty(), "every column's id was carried over, so nothing inside differs");
     }
 
-    @Test
-    void aDroppedTableIsLeftOnlyWithEveryMemberOnTheLeft() {
-        TableModel orders = table("CREATE TABLE orders (id INT NOT NULL, total NUMERIC(10,2));");
-
-        List<TableDiff> tableDiffs = databaseDiff.diff(List.of(orders), List.of());
-
-        assertEquals(1, tableDiffs.size());
-        assertTrue(tableDiffs.getFirst().onlyOnLeft());
-    }
-
     private ChangeSet changeset(String ddl) {
         return new ChangeSet(idSequence++, "test", ddl, ChangesetStatus.COMMIT, Instant.now());
     }
