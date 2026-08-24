@@ -1,0 +1,53 @@
+dbgit Evaluation License
+Copyright (c) 2026 Varun Mundale
+
+This license governs use of the accompanying software ("the Software"). By using, copying, or
+modifying the Software, you agree to the following terms.
+
+1. GRANT OF LICENSE
+
+Subject to the terms below, the copyright holder grants you a non-exclusive, non-transferable,
+royalty-free, revocable license to use, copy, and modify the Software solely for the following
+purposes ("Permitted Purposes"):
+
+  - personal, academic, or internal evaluation and testing;
+  - non-commercial experimentation and learning.
+
+2. NO COMMERCIAL USE
+
+You may NOT use the Software, or any modified or derivative version of it, for any commercial
+purpose without the copyright holder's prior written permission. "Commercial purpose" includes,
+without limitation:
+
+  - using the Software in, or in support of, a product or service that is sold, licensed,
+    or offered for a fee, including as part of a hosted or managed service (e.g. SaaS);
+  - using the Software in the internal operations of a for-profit business, beyond internal
+    evaluation of whether to obtain a commercial license;
+  - selling, sublicensing, leasing, or otherwise monetizing the Software or access to it;
+  - using the Software to build a competing product.
+
+If you want to use the Software commercially, contact the copyright holder to discuss a
+commercial license: varunmundale@gmail.com.
+
+3. REDISTRIBUTION
+
+You may share unmodified copies of the Software for the Permitted Purposes only, provided this
+license file is included unchanged. You may not distribute the Software, modified or not, for
+any commercial purpose.
+
+4. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+5. TERMINATION
+
+This license terminates automatically if you breach any of its terms. Upon termination, you must
+stop using the Software and destroy all copies in your possession.
+
+6. NO OTHER RIGHTS
+
+All rights not expressly granted here are reserved by the copyright holder. This license does not
+grant you any rights to the copyright holder's trademarks, service marks, or logos.

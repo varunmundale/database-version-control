@@ -18,7 +18,7 @@ in-memory H2, same commands and same model either way.
 
 ## Try it!
 
-**Live, in your browser — no install:** **http://34.41.100.92:8080/**
+**Live, in your browser — no install:** **http://34.44.41.11:8080/**
 
 - **Initialize** points the shared `main` at whatever database you want it to track — it's a
   workspace setup step, not per-author, so the first person to run it sets it for everyone until it's
@@ -140,3 +140,8 @@ curl -fsSL https://raw.githubusercontent.com/varunmundale/database-version-contr
 
 One command: installs Docker, Postgres, a JDK, builds the project, and runs `dbService` plus a browser
 UI behind two systemd services. Details and redeploy/teardown: [`docs/deploying.md`](docs/deploying.md).
+
+## License
+
+Evaluation only — see [`LICENSE`](LICENSE). No commercial use without permission from the copyright
+holder; contact varunmundale@gmail.com to discuss one.
