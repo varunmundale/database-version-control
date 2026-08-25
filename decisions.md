@@ -197,85 +197,27 @@ a full four days after the diff engine it replaced.
 branches", `1043be0` "add init command", `ecb839a` "add mysql support" and `1dcb47b` "add jooq as
 ORM support, extract out repositories".*
 
-**Context.** Application code has branches, history, diffs and merges; a schema, in most teams, has
-a folder of migration scripts and a convention about who runs them. Every mismatch is paid for by a
-person: two developers cannot try incompatible changes on one shared database, so someone waits;
-checking out a colleague's branch gives you their code against your schema; diffing two live
-databases says they differ but never who moved what; a rename reads as a column dropped and an
-unrelated one added, which is also how it gets applied; and reconciling two branches that touched
-the same table is a human reading two folders of SQL.
+**Context.** Application code has branches, history, diffs and merges; database schemas typically have migration folders and conventions around who runs them. This creates friction: developers cannot safely work on incompatible schema changes, switching branches can leave code mismatched with the database, live diffs show what differs but not how it changed, renames look like drop + add, and merging schema changes requires manually reconciling SQL.
 
-Two days of reading git, Dolt, Liquibase and Flyway found the market split in two with nothing in
-the middle. Liquibase and Flyway version the *instructions* and never model what is inside the
-database, so they cannot say what two schemas differ by or whether a column was renamed. Dolt
-versions the *data* by being the database — excellent, and priced at migrating onto its storage
-engine, which a team with data they cannot move will not pay for schema branching. The gap is a
-real, forked database per branch on the vendor you already run. Three commitments follow from it,
-and all three had to be fixed before any code, because each constrains the architecture in a way
-that is expensive to retrofit.
+Existing tools sit at two extremes. Liquibase and Flyway version migration instructions but do not model database state, while Dolt versions the entire database by owning the storage engine. The gap is **schema branching on the database vendor you already use**.
 
-**Decision.** Commit to all three at once.
+**Decision.** Commit to three things:
 
-*Fork safely from a live database.* `main` tracks a database dbgit did not create. `dbgit init`
-records host, port, database and user in the metadata store with **no password column at all**, so
-the schema itself guarantees credentials never reach shared storage; the password stays in
-`.dbgit/config.json`, local and gitignored. The record carries a derived signature,
-`StableId.of("connection", host:port/database)` — credential-free and deterministic, which is what
-makes `init` idempotent. `reset` refuses `main` outright.
+* **Fork safely from a live database.** `main` tracks an existing database that dbgit does not own. `init` stores connection metadata but never credentials; the password stays local and gitignored. `reset` can never operate on `main`.
 
-*More than one vendor, from day one.* Three dialects, with their differences split by kind.
-Vocabulary is **data**: one concrete `SqlDdlParser` constructed with a `DialectGrammar` record
-holding which `AlterOperation` spells a retype, that retype's syntax for error messages, and the
-identity tokens this dialect recognizes. Behaviour is **code**: a connector class each, because
-`H2Connector` must translate `CREATE`/`DROP DATABASE` into opening the named database and running
-`DROP ALL OBJECTS`, and `MySqlConnections` must put `ANSI_QUOTES` on every URL so MySQL reads
-`BranchDatabaseRepository`'s double-quoted identifiers as identifiers rather than string literals.
+* **Support multiple vendors from day one.** Shared schema logic is separated from dialect-specific syntax and vendor-specific behaviour, avoiding separate implementations of the same core algorithm.
 
-*More than one user.* Branch metadata, commits and changesets live in three tables in a separate,
-always-on PostgreSQL instance, written only by `MetadataVersioningService` and reached only through
-the `VersioningService` interface. Two client libraries follow: the metadata repositories speak jOOQ
-(`MetadataDatabase.transaction`, with a `ThreadLocalTransactionProvider`), branch databases take raw
-SQL (`SqlConnector.transaction`), and connection *opening* happens in exactly one package.
+* **Support multiple users and workspaces.** Branches, commits and changesets live in a shared PostgreSQL metadata store, providing durable history, transactions and cross-process locking.
 
-And the whole surface is spelled in git's vocabulary, exactly: `checkout -b`, `add`, `commit`,
-`diff`, `merge`, `log`, `reset`, `branch`, with the same flags where they exist.
+The CLI deliberately follows git's vocabulary: `checkout -b`, `add`, `commit`, `diff`, `merge`, `log`, `reset` and `branch`.
 
-**Why.** The three commitments are inseparable — a tool that forks your real database but supports
-one vendor is a demo; one that supports three vendors but serves a single user is a laptop toy; one
-that serves a team but forks from nothing real is a migration runner with better vocabulary. Beyond
-that, each has its own reason. `main` must be inviolable because dbgit did not create it and cannot
-replace it, so the one operation that rebuilds a database by dropping it must not go near it. Three
-dialects rather than one because a single vendor lets you believe an abstraction exists without ever
-testing it, and a subclass per dialect for something that differs by a keyword is how a codebase
-grows three copies of one algorithm that drift apart. The metadata store must be *shared* (several
-workspaces and one service agreeing on what exists), must *survive a branch being deleted* (commits
-outlive the branch they were made on — a merge's staging branch is dropped while its commits stay
-reachable), and must offer *transactions and cross-process locks* (the commit/changeset flip is
-atomic, and the branch lock is an advisory lock on this same server, which keeps it one dependency
-rather than two). PostgreSQL for unglamorous reasons: open-source, ACID, and session-scoped advisory
-locks — the exact primitive the concurrency model needed four days later. The vocabulary is borrowed
-because the pitch is "git, for your schema", and a user who has to learn `dbgit promote` has been
-told the pitch is a metaphor rather than a promise; it also front-loads the mental model, since
-anyone who knows `git diff` compares two points in history rather than two directories already
-expects `dbgit diff` to compare two *histories*.
+**Why.** These decisions constrain the architecture and are expensive to retrofit. Forking a real database is the core value proposition; multi-vendor support prevents the design from becoming tied to one database; and shared metadata is required for team collaboration and history that survives branch deletion.
 
-**Rejected.** *Git as the history store* — dbgit would need a working copy per workspace and would
-inherit git's merge semantics rather than the schema's. *The branch databases as the store* —
-history would die with the branch. *SQLite* — no server, therefore no cross-process advisory lock
-and no shared access. *One vendor now, port later* — retrofitting a second vendor into a
-Postgres-shaped design is the kind of change that never quite finishes. *Domain-specific verbs*
-(`fork`, `apply`, `promote`, `rollback`) — more precise in isolation, but they impose a translation
-step on every user forever to save the author one paragraph. *A SQL-function or system-table
-interface*, Dolt's approach — coherent if you own the engine, which dbgit does not and deliberately
-never will.
+PostgreSQL is used only for dbgit's metadata, regardless of the user's database vendor. Its ACID transactions and advisory locks provide the required concurrency model without another dependency. Git's vocabulary is intentional: users should be able to transfer their existing mental model directly to schema versioning.
 
-**Cost.** The metadata store is PostgreSQL only, full stop, even when branch databases are MySQL or
-H2: jOOQ is pinned to the Postgres dialect, `metadata-schema.sql` is Postgres DDL, and the lock is a
-Postgres advisory lock. Accepted, because it is dbgit's own storage rather than the user's.
-Borrowing git's vocabulary means every absence reads as a gap rather than a non-feature — there is
-no `push`, `pull`, `cherry-pick`, `revert` or stash, and `reset` has no `--soft`/`--hard`. And
-before `init` has run, `main` has no database and says so; that error message exists because the
-earlier behaviour, silently falling back to the scratchpad, was worse.
+**Rejected.** *Git as the history store* — introduces filesystem-style working copies and unsuitable merge semantics. *Branch databases as the history store* — history disappears when a branch is deleted. *SQLite* — no shared server or cross-process advisory locks.
+
+**Cost.** The metadata store is PostgreSQL-only, even when branch databases use MySQL or H2. The initial CLI also omits `push`, `pull`, `cherry-pick`, `revert`, stash and soft/hard reset. Before `init`, `main` has no associated database and reports that explicitly rather than silently falling back to a scratch database.
 
 ---
 
