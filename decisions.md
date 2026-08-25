@@ -561,176 +561,72 @@ still guards.
 
 ### 8. Branch mutations are serialized by a session-scoped PostgreSQL advisory lock
 
-*Landed: Aug 22 — `dfb774f` "add concurrency; initial version", `d0ce041` "concurrency support,
-changes and fixes"; compensation added Aug 23 in `4cd06e9`.*
+*Landed: Aug 22 — `dfb774f` "add concurrency; initial version", `d0ce041` "concurrency support, changes and fixes"; compensation added Aug 23 in `4cd06e9`.*
 
-**Context.** The daemon serves many people at once, and a mutating command is not a transaction.
-`Stager`, `Committer`, `Merger` and `Resetter` all interleave metadata transactions with side
-effects that cannot be rolled back — live DDL, `CREATE`/`DROP DATABASE`, `docker`. Whatever
-serializes them has to outlast any one transaction, survive across daemon processes, and cope with a
-handler dying midway.
+**Context.** The daemon serves many users concurrently, but mutations are not single database transactions. Commands such as `commit`, `merge`, `reset` and `checkout` combine metadata updates with irreversible side effects like DDL, database creation/deletion and Docker operations. The concurrency mechanism therefore has to protect the entire operation, across transactions and daemon processes.
 
-**Decision.** `AdvisoryBranchLock` takes `pg_try_advisory_lock` on a connection of its own and holds
-it for the whole operation, polling until it gets it — **session**-scoped, not transaction-scoped,
-and living in the core operation classes rather than in `MetadataVersioningService`. Around that,
-five things belong to the same decision. `BranchLocks.acquire` sorts branches lexicographically and
-releases in reverse. Reads — `log`, `diff`, `branch` — take no lock at all. Two backstops sit behind
-the lock: `BranchMetadataRepository.updateHeadCommitId` is a compare-and-set, and reads that inform
-a decision go through `MetadataDatabase.snapshot`, a `REPEATABLE READ` transaction. Every
-irreversible side effect has a compensating action. And `DbGitCommandListener` hands each socket to
-a `ThreadPoolExecutor` sized by `concurrency.handlerThreads`, answering `ERR Server busy` on
-overflow and draining rather than killing on close. Connections are not pooled.
+**Decision.** Mutating operations acquire a **session-scoped PostgreSQL advisory lock** for every affected branch and hold it for the entire operation. Locks are acquired in lexicographic order and released in reverse order. Reads such as `log`, `diff` and `branch` take no lock.
 
-**Why.** A `pg_advisory_xact_lock` would already have been released by the time the real DDL runs,
-which is precisely the window that matters. Advisory and on the metadata store, because it then
-holds across daemon processes rather than within one JVM and needs no new dependency — that
-PostgreSQL is already mandatory and always-on — and because closing the connection drops the lock,
-so a handler that dies without unlocking still frees the branch. `try` in a poll loop rather than a
-blocking `pg_advisory_lock`, because that yields a timeout and therefore a reportable error instead
-of an indefinite hang. Lexicographic ordering because `merge` holds target and source while
-`checkout -b` holds parent and child: two merges in opposite directions, each taking "my branch
-first, then yours", is the textbook deadlock — and with a try-lock poll loop it is worse than a
-clean deadlock, since the two spin against each other until both time out and both fail. Reads take
-nothing because a migration can hold a branch for a long time and nobody should be unable to *look*
-at one; the read-modify-write reads are already inside the lock, so what goes unlocked is only
-output for a human, stale the moment it reaches the terminal. The backstops exist because a lock
-that is ever missed should produce a visible error rather than a commit that silently becomes
-unreachable, and because outside a transaction jOOQ takes a fresh connection per query — so
-reconstructing a branch's commits spanned three snapshots and could observe a commit landing halfway
-through. Compensation exists because transactions cannot span a metadata store and a live `CREATE
-DATABASE`, so the only alternative is a state no command can fix: a fork that fails after claiming
-its name drops the half-built database and returns the name, a changeset the database rejected is
-deleted rather than left at `PENDING` where it could never be committed yet would still count as
-working set, a merge's staging branch is dropped in a `finally`, and `ProcessCommandRunner` bounds
-`docker` with a timeout because a hung subprocess costs a handler thread permanently. The pool is
-bounded because unbounded queueing turns overload into a long tail of timeouts instead of an
-immediate, honest refusal; it drains on close because a `reset` caught between its `DROP DATABASE`
-and its replay must finish; and `ensureBranchDatabasesRunning()` is called *outside* the locks,
-since it is global and a cold image pull would otherwise stall every command on those branches for
-minutes.
+Two additional safeguards protect against races: branch head updates use compare-and-set, and decision-making reads use `REPEATABLE READ` snapshots. Since metadata transactions cannot roll back external side effects, every irreversible operation also has a compensating action.
 
-**Rejected.** *A transaction-scoped advisory lock* — released before the DDL it is meant to protect.
-*A blocking `pg_advisory_lock`* — no timeout, so contention becomes an indefinite hang with nothing
-to report. *A JVM-level lock* — correct only within one process; `InMemoryBranchLock` exists solely
-as a test double for exactly that reason. *Unbounded queueing* — trades an honest refusal for a slow
-one. *Connection pooling* — it would buy latency rather than capacity, and introduces a real hazard,
-since a pooled idle connection to a branch database blocks the `DROP DATABASE` that fork-failure
-cleanup and `reset` both depend on.
+The daemon uses a bounded thread pool. When all handlers are busy, new requests immediately receive `ERR Server busy` rather than waiting indefinitely.
 
-**Cost.** Each in-flight mutating command pins one metadata connection for the lock on top of the
-one doing the work, so the metadata server needs room for roughly `2 × handlerThreads` —
-PostgreSQL's default of 100 leaves ample headroom. Ordered acquisition buys deadlock-freedom, not
-parallelism: both commands need both branches, so there is nothing to overlap. And the pool must be
-sized for the *slowest* command rather than the average.
+**Why.** A transaction-scoped lock would be released before the real DDL or database operation completes, leaving exactly the race we need to prevent. A session-scoped advisory lock survives across transactions and daemon processes, while closing the connection automatically releases it if a handler dies.
 
----
+Locks are acquired in a fixed order to prevent deadlocks when an operation needs multiple branches. Reads remain unlocked so a long-running migration does not prevent users from inspecting the branch.
 
-### 9. Integration tests: H2 branch databases, one PostgreSQL testcontainer for metadata, skip without Docker
+Compensation handles failures that cannot participate in the metadata transaction: failed forks remove the partially-created database, rejected changesets are removed instead of remaining `PENDING`, and temporary merge branches are cleaned up even when the operation fails.
 
-*Landed: Aug 22 — `6088a24` "add integration tests", then `06fea71` "make integration tests h2
-based".*
+**Rejected.** *Transaction-scoped advisory lock* — released before the DDL it protects. *Blocking advisory lock* — can hang indefinitely instead of producing a useful timeout. *JVM-level lock* — does not coordinate multiple daemon processes. *Unbounded request queue* — turns overload into long latency instead of an immediate refusal. *Connection pooling* — adds little capacity benefit and can leave idle connections blocking operations such as `DROP DATABASE`.
 
-**Context.** The thing worth testing is a whole installation: a daemon, a socket, a metadata store,
-a branch database per branch, and real locks between them. Testing that honestly means standing it
-all up per test; standing it all up *literally* means a database container per branch, which costs
-minutes per test and makes the suite something nobody runs.
-
-**Decision.** Assemble the whole installation per test — daemon on its own port, client with its own
-`.dbgit`, a real socket between them, the real `MetadataVersioningService` over real jOOQ, real
-advisory locks — and substitute only infrastructure. Branch databases are in-memory H2. The metadata
-store is a PostgreSQL testcontainer on the **fixed** port the test `dbgit.json` names, 54329. Each
-test truncates with `RESTART IDENTITY`. Without Docker the suite skips rather than fails.
-
-**Why.** H2 is legitimate here rather than a second implementation: `H2Connections` and
-`H2Connector` are the same production classes `dialect: "h2"` selects for real, and `H2Databases`
-only tracks what was handed out so `reset()` can empty it between tests. The metadata store *cannot*
-be H2 at all — jOOQ is pinned to the Postgres dialect, the schema is Postgres DDL down to
-`BIGSERIAL`, and the branch lock is a Postgres advisory lock. Its port is fixed rather than
-ephemeral because `MetadataStoreConfig` is a static singleton read long before any container could
-start, so the container has to follow the configuration rather than the reverse; 54329 is chosen so
-it cannot collide with a developer's own server on 5432. `RESTART IDENTITY` is what lets a test
-assert on `commit #1`. Skipping without Docker keeps `mvn test` clean on a machine that has none.
-And the reason this layer earns its keep over the unit tests next door is `DatabaseSchema`, which
-reads `INFORMATION_SCHEMA` back out: since dbgit never introspects (decision 4), that readback is
-the only way to show a fork, merge or reset actually put the schema it claimed into the database it
-built.
-
-**Rejected.** *A real database container per branch* — minutes per test, so the suite stops being
-run. *Mocking the metadata store or the socket* — it would test the mock, and the interactions worth
-catching are precisely the ones at those seams. *An ephemeral container port* — impossible given a
-static config singleton read at class-load time. *Failing rather than skipping without Docker* — it
-makes the default `mvn test` red on a clean machine for a reason unrelated to the code.
-
-**Cost.** One real divergence: H2 commits DDL implicitly, so a replay that fails part-way is not
-rolled back there as it would be on PostgreSQL — that behaviour is asserted at the unit level
-instead. And a fixed port is a fixed port: something else already listening on 54329 breaks the
-suite.
+**Cost.** Each mutating request holds a metadata connection for its advisory lock in addition to the connection doing the work, so the metadata database needs roughly `2 × handlerThreads` connections. Ordered locking prevents deadlocks but does not increase parallelism when operations touch the same branches. The bounded pool must therefore be sized for the slowest mutation, not the average request.
 
 ---
 
 ### 10. dbgit is not a SQL parser: JSqlParser does the parsing, and the accepted DDL is a strict whitelist
 
-*Landed: Aug 18 — `d22c406` "add postgres and h2 connectors and parsers", the first commit that had
-to read DDL at all; the whitelist settled Aug 21 in `476bca2` and was extended Aug 24 by `8f29c39`.*
+*Landed: Aug 18 — `d22c406` "add postgres and h2 connectors and parsers"; the whitelist settled Aug 21 in `476bca2` and was extended Aug 24 by `8f29c39`.*
 
-**Context.** dbgit has to understand DDL text well enough to build a `TableModel` from it. Writing a
-SQL parser is a multi-month project in its own right, and one where a half-finished job is
-indistinguishable from a finished one until it corrupts something. Whatever the parser understands
-then decides what the model can represent — and therefore what has to be refused.
+**Context.** dbgit needs to understand DDL well enough to build its schema model. Writing a SQL parser is a large project and a dangerous place to be partially correct. More importantly, whatever the parser accepts determines what the model can represent.
 
-**Decision.** Delegate the parse, and refuse the remainder explicitly. **JSqlParser** (5.3) does all
-tokenizing and produces the AST; `SqlDdlParser` is a translation layer over it, dispatching to
-`ColumnMapper`, `ColumnSpecs` or `ConstraintMapper` and producing a `SchemaOperation`. Nothing in
-this codebase tokenizes SQL. On top of that sits a whitelist of ten operations — `CREATE TABLE`
-(columns only), `DROP TABLE`, `ALTER TABLE … RENAME TO`, `ALTER TABLE … ADD|DROP|RENAME COLUMN`, the
-dialect's retype, `ADD CONSTRAINT … PRIMARY KEY|UNIQUE|FOREIGN KEY`, `DROP CONSTRAINT`, and `CREATE
-[UNIQUE] INDEX` — with `NOT NULL`, `DEFAULT` and the dialect's identity spec exempt from the
-constraint rules, being properties of the column that `ColumnModel` already carries. Every refusal
-that has a supported equivalent quotes it, filled in with the user's own identifiers.
+**Decision.** Use **JSqlParser 5.3** for SQL parsing and keep `SqlDdlParser` as a translation layer from its AST into dbgit's `SchemaOperation`s. dbgit does not tokenize or parse SQL itself.
 
-**Superseded.** A constraint written inline (`id INT PRIMARY KEY`, `email TEXT UNIQUE`) or as a
-table-level clause used to be **silently ignored** — so the constraint existed in the real database
-and not in the model, invisible to `dbgit diff` and absent when the branch was forked and its
-history replayed. The `IF EXISTS` family was inconsistent in the same spirit: `CREATE TABLE IF NOT
-EXISTS` was accepted and honoured while `ALTER TABLE IF EXISTS …` was accepted with the clause
-silently discarded, found only while adding `DROP TABLE`/`RENAME TO` and asking what `IF EXISTS` on
-*those* should mean.
+The supported DDL is deliberately a strict whitelist:
 
-**Why.** The value of this project is the model, the stable identities and the merge semantics, none
-of which improve by owning a grammar; delegating also means adding a statement is usually one branch
-in the translation plus one `SchemaOperation` variant. The refusals are structural rather than
-preference. `CHECK` has nowhere to live in `ConstraintType`. `DROP INDEX` is refused in every
-spelling because an index name carries no table and dbgit replays a history one table at a time, so
-it cannot tell which table's model to edit. `IF EXISTS`/`IF NOT EXISTS` is refused everywhere
-because it would mean one thing on a branch that has the object and nothing on one that does not,
-and every statement in a replayed history must mean the same thing every time it runs. `DROP TABLE …
-CASCADE` can drop constraints on other tables that replay never sees and `dbgit diff` can never
-report. Several changes in one `ALTER TABLE` are refused because one statement, one change is the
-unit a changeset, a diff and a conflict are all expressed in. MySQL's own `RENAME TABLE t TO u` is
-refused because `ALTER TABLE t RENAME TO u` is accepted by every dialect, so only one form needed
-accepting. And a refusal names the fix because strictness is only defensible if it is cheap to
-comply with — the rejection is where a user meets the model's boundary, so it is the one place worth
-spending words on what was wrong, why the tool cares, and what to type.
+- `CREATE TABLE`
+- `DROP TABLE`
+- `ALTER TABLE ... RENAME TO`
+- `ADD | DROP | RENAME COLUMN`
+- dialect-specific column retype
+- `ADD CONSTRAINT` for `PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`
+- `DROP CONSTRAINT`
+- `CREATE [UNIQUE] INDEX`
 
-`DROP TABLE` and `RENAME TO` needed one addition worth recording. Every other operation is one table
-in, one table out: `SchemaOperationApplier.apply` edits the `TableModel` it is handed, with no view
-of the schema as a whole. These two are the first whose effect is on the schema **map** — a drop
-leaves no table behind, a rename moves to a different key — so the applier keeps its shape (a drop
-yields `null`, a rename the same table under a new name) and the map-level bookkeeping moved up into
-`Replayer.apply(Map, String)`, the only place that already owns the whole map while replaying.
+Column properties such as `NOT NULL`, `DEFAULT` and identity are supported as part of the column model.
 
-**Rejected.** *Hand-rolled parsing* — weeks of effort to be permanently slightly wrong. *Asking the
-target database to parse it*, via `PREPARE` or execute-and-roll-back — needs a live connection at
-`add` time, differs per vendor, cannot roll back on MySQL, and yields a yes/no rather than the AST
-the model is built from. *Silently ignoring the unmodellable part* — the original behaviour, and
-precisely the bug this decision exists to kill. *A generic parse error naming the offending token* —
-accurate and useless. *Passing the whole schema map into `SchemaOperationApplier`* — it would make
-the applier the schema's owner and contradict its contract of editing one table it is given.
+Unsupported constructs are rejected explicitly, with the error suggesting the supported equivalent where possible.
 
-**Cost.** dbgit is bounded by what JSqlParser understands and by the shape of its AST; a few
-refusals exist because the AST does not distinguish something the model needs, and upgrading the
-library is a real dependency risk on the one component nothing else can replace. The refusal
-messages carry real content and would drift if the rules changed, so `constraints-rejected-demo.sh`,
-`table-commands-rejected-demo.sh` and `RejectedDdlIntegrationTest` all assert on them.
+**Superseded.** Inline and table-level constraints were previously silently ignored, causing the real database and dbgit's model to diverge. `IF EXISTS` / `IF NOT EXISTS` was also inconsistently accepted and discarded. Both behaviours were replaced with explicit rejection.
+
+**Why.** dbgit's value is the schema model, stable identities and merge semantics—not owning a SQL grammar. Delegating parsing keeps that complexity out of the codebase while still giving dbgit an AST it can translate into its own operations.
+
+The whitelist is necessary because every accepted statement must have deterministic meaning in the model and during replay.
+
+For example:
+
+- `CHECK` has no representation in `ConstraintType`.
+- `DROP INDEX` does not identify the table whose model should be changed.
+- `IF EXISTS` makes replay dependent on the current state instead of giving a deterministic operation.
+- `DROP ... CASCADE` can modify objects outside the table currently being replayed.
+- Multiple changes in one `ALTER TABLE` break the one-statement/one-change unit used by changesets and conflicts.
+- MySQL's `RENAME TABLE` is unnecessary because `ALTER TABLE ... RENAME TO` provides a common form.
+
+Rejections therefore explain both the problem and the supported alternative rather than returning a generic parser error.
+
+`DROP TABLE` and `RENAME TO` are also handled at the schema-map level because they remove or change the key of a table, unlike operations that simply modify one `TableModel`.
+
+**Rejected.** *Hand-written parser* — large effort with significant correctness risk. *Let the database parse it* — requires a live connection, differs by vendor, cannot reliably roll back across databases, and returns validation rather than the AST needed to build the model. *Silently ignore unsupported parts* — creates divergence between the model and the real database. *Generic parser errors* — technically accurate but provide no useful path forward. *Pass the entire schema map into `SchemaOperationApplier`* — makes the operation layer responsible for the whole schema instead of a single table.
+
+**Cost.** dbgit is limited by JSqlParser's supported syntax and AST. Upgrading it carries dependency risk because parsing is foundational. Since rejection messages are part of the user experience, integration tests assert their content to prevent them from drifting.
 
 ---
