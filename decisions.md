@@ -260,160 +260,112 @@ if it ever starts to hurt (§4 item 4).
 
 ### 3. Every branch lives on the server; there are no local branches, and no push or pull
 
-*Landed: Aug 19 — settled with the client/server split in `4bc3cf7` "create client-server and
-terminal support"; a scoping decision rather than a feature, so it has no commit of its own.*
+*Landed: Aug 19 — settled with the client/server split in `4bc3cf7`; a scoping decision rather than a feature.*
 
-**Context.** Git's branches are local until you push, and dbgit borrows git's vocabulary wholesale,
-so the question is whether it should borrow this too — a branch you create privately, work on, and
-publish later.
+**Context.** Git branches are local until pushed. Since dbgit borrows git's vocabulary, the question was whether it should also support private local branches and later publishing.
 
-**Decision.** No. A branch exists in the shared metadata store the moment it is created and is
-visible to everyone immediately; there is no local branch, no remote, and no `push`, `pull`, `fetch`
-or `clone`. What follows is that the daemon holds no per-user state at all: there is no
-`.dbgit/HEAD` on the server and no working directory. Every request opens with a mandatory `DBGIT/1`
-header carrying the caller, their branch, and the credentials for the database `main` tracks, and
-`CommandContext` is rebuilt per request around shared collaborators. The only local state is which
-branch this workspace has checked out and how to reach `main`. Two details of the command surface
-fall out of the same shape: `add` reads its DDL from stdin rather than argv, and a commit message is
-the rest of the line rather than a quoted argument. Help lives beside each command — every `Command`
-declares its own `public static final CommandUsage USAGE`, read by both `HelpCommand` and
-`CommandFactory`.
+**Decision.** No. A branch is created directly in the shared metadata store and is immediately visible to everyone. There are no local branches, remotes, `push`, `pull`, `fetch` or `clone`. The daemon is stateless: it holds no per-user branch or working-directory state. Each request carries the caller, branch and database credentials, while the client only stores its checked-out branch and how to reach `main`.
 
-**Why.** A branch here is a running database on a shared server, not a set of files in a working
-directory, so there is nothing local for a private branch to be made of. Ruling it out also deletes
-a whole category of problem the design then never has to solve: no divergent copies of one branch
-name, no fetch-versus-merge distinction, no stale local view, and `dbgit branch` showing everyone
-the same list. Two shells in two directories can share one daemon and each stay on their own branch
-with no session state to leak between them. The header is mandatory rather than
-optional-with-defaults because a request without one carries too little to act on, and a default
-would be a silent wrong answer rather than an error. `add` reads stdin because DDL spans multiple
-lines, which argv handles badly, and the message is the rest of the line because the daemon receives
-a command line already split on whitespace — whatever quoting the shell stripped is long gone by
-then. Help is declared on the class because the two things that must never disagree are what the
-tool accepts and what it says it accepts, and one declaration makes that drift structurally
-impossible rather than a review item.
+The command surface follows the same model: `add` reads DDL from stdin, commit messages use the remainder of the command line, and each command owns its help definition so the CLI and help cannot drift.
 
-**Rejected.** *Local branches with push/pull* — a distributed-version-control model for objects that
-are not distributable, and weeks of work to reproduce a git feature whose value here is unclear;
-supporting it would mean either a database engine on every laptop, abandoning the premise the tool
-exists for, or a branch that is merely a name until published, which is a migration script with
-extra steps. *A separate help file or resource bundle* — guaranteed to drift the first time a flag
-changes. *Annotations plus reflection* — the same guarantee with more machinery than eleven commands
-justify.
+**Why.** A dbgit branch is a running database on a shared server, not a collection of local files, so there is nothing meaningful to keep locally. This also eliminates divergent local branches, stale state, fetch/merge distinctions and session state on the daemon. Two workspaces can use the same daemon while independently operating on different branches.
 
-**Cost.** No offline work, and no private experimentation: every branch anyone creates is visible to
-everyone. Help text lives in Java source rather than somewhere a non-developer could edit it, which
-is fine given who edits it.
+The request header is mandatory because a missing branch or caller cannot safely default to anything. `add` uses stdin because DDL is naturally multi-line, while commit messages use the remainder of the line because shell quoting has already been removed before the daemon receives the command.
+
+**Rejected.** *Local branches with push/pull* — introduces distributed-version-control machinery for server-side databases without a clear benefit. *Separate help files* — can drift from the actual command implementation. *Annotations plus reflection* — adds machinery without enough value for the small command surface.
+
+**Cost.** There is no offline work or private experimentation; every branch is immediately visible to the team. Help text also lives in Java source, which is acceptable for a developer-oriented tool.
 
 ---
 
 ### 4. The recorded history is the source of truth; a live database is never introspected
 
-*Landed: Aug 18 — `7dd4e8a` "add branch-fork", `5674802` "branch-fork flow tested". The first fork
-replayed history rather than copying a database, and every later feature inherited it.*
+*Landed: Aug 18 — `7dd4e8a` "add branch-fork", `5674802` "branch-fork flow tested". The first fork replayed history rather than copying a database, and every later feature inherited it.*
 
-**Context.** A schema-versioning tool can learn a schema two ways: read it out of
-`INFORMATION_SCHEMA`, or replay what it was told. Having chosen replay, a second question follows
-immediately — `dbgit add` already replays the branch's history into memory and applies the new
-statement there, which is enough to validate it and compute a diff, so why also execute it against a
-live database?
+**Context.** A schema-versioning tool can learn a schema by introspecting the database or by replaying recorded DDL. Since `add` already replays history to validate and compute changes, the question was whether it should also execute the DDL against the live database.
 
-**Decision.** Only ever replay, and also always execute. Nothing in `org.example` reads a schema out
-of a database; a `TableModel` comes into existence exactly one way, with `DdlParser` parsing a DDL
-string and `Replayer` folding a sequence of them. And every statement still runs for real: `Stager`
-previews in memory, stages the changeset as `PENDING`, executes the DDL, then marks it `APPLIED`.
-The in-memory model is the semantic layer; the real database is the validation and product layer. A
-fork is the same operation — `Forker.fork` creates a database named after the sanitized branch and
-replays every committed statement into it, in order, as one transaction. Because the changeset row
-and the statement live in different databases and cannot share a transaction, changesets move
-through `PENDING` → `APPLIED` → `COMMIT`, the row written *before* the DDL runs. Output then reports
-what actually happened: `add` answers with the table and its new column count, `commit` names the
-commit number and how many changesets it folded, and `log` prints commits newest-first above a
-`Working set` block showing everything staged but uncommitted, `PENDING` rows included.
+**Decision.** The recorded history is the source of truth, but every statement is also executed against the real database. `DdlParser` and `Replayer` build the in-memory schema model by replaying DDL; `Stager` validates the change, records it as `PENDING`, executes it, then marks it `APPLIED`. A fork creates an empty database and replays the committed history in order.
 
-**Why.** Replay makes fork, merge and reset the *same* operation — replay this list of statements
-into an empty database — and that operation is deterministic and reproducible, which is what makes a
-branch mean the same thing on any machine. It also keeps the model vendor-independent, with no
-catalogue queries per dialect. Executing for real matters for five reasons that compound: a branch
-that is not a database is not the product, since the whole value proposition is connecting to your
-branch and pointing an application at it; the model is a deliberate subset while the real database
-knows the rest of SQL, the actual type system, collations and name-length limits, so a statement
-that will be rejected should be rejected the moment you type it rather than at 3am when someone
-forks the branch and replay dies on statement 40 of 60; running both means they must agree or there
-is a bug, which turns every statement into a differential test of the parser against the database,
-caught by the person who wrote it on a branch that is safe to break; validating against the model
-alone could never see the database's actual state, so executing is the only thing keeping "this
-branch's database matches this branch's history" true rather than merely asserted; and it keeps the
-failure mode small, since one statement at a time under the branch lock means at most one is ever in
-flight. Writing the changeset row first means a reader always sees an in-flight migration honestly
-labelled, never a statement that ran with nothing recording it. And a fork by replay doubles as a
-continuous integrity check on the history.
+Because metadata and the branch database cannot share a transaction, changesets move through `PENDING → APPLIED → COMMIT`, with the `PENDING` record written before executing the DDL.
 
-**Rejected.** *Introspect-and-diff*, the classic schema-compare approach — it cannot see intent,
-since a rename is indistinguishable from a drop plus an add, and it cannot answer "who changed
-this?", the question all of decision 7 turns on. *Model only, executing at commit time* — cheaper
-per `add`, but the branch database is stale between commits so you cannot run your app against it,
-and every error moves to a batch boundary where it is expensive and ambiguous. *Database only, no
-model* — `diff` would have to introspect two live databases, unable to tell a rename from a
-drop-plus-add or attribute a change to a side. *Model now, database asynchronously* — two sources of
-truth that are eventually consistent, in a tool whose entire point is that the schema is knowable.
-And for the fork itself, *`CREATE DATABASE … TEMPLATE`, a file copy, or `pg_dump | psql`* — all
-faster, all copying whatever the source happens to contain including drift, and none working across
-the three supported dialects.
+**Why.** Replay makes fork, merge and reset deterministic: all are effectively "replay this history into an empty database." It also keeps schema semantics vendor-independent.
 
-**Cost.** Out-of-band changes to a branch database are invisible and surface later as a replay
-failure — acceptable because branch databases are dbgit's own scratchpads, and the one database
-dbgit did not create is `main`'s, which is exactly why `reset` refuses it. `add` is exactly as slow
-as the DDL is, so a `CREATE INDEX` over a large table holds its branch for the duration. Fork time
-grows with history length. And a `PENDING` row whose statement failed is meaningless, so it must be
-deleted rather than left behind — see decision 8.
+The real database is still required because the model cannot represent every database rule. Executing DDL catches real type-system, constraint, collation and database-specific errors immediately. It also makes the live branch database usable by applications and continuously validates that the recorded history matches what the database actually accepts.
+
+Writing `PENDING` first ensures an in-flight operation is visible rather than leaving an executed statement with no record.
+
+**Rejected.** *Introspect-and-diff* — loses intent and cannot distinguish renames from drop + add. *Model only, execute at commit* — leaves the branch database stale and moves failures to commit time. *Database only* — requires live introspection and loses semantic history. *Async database updates* — creates two eventually-consistent sources of truth. For forks, *database cloning or dumps* — copies existing drift and is not portable across vendors.
+
+**Cost.** Out-of-band changes to branch databases are invisible and eventually surface as replay failures. `add` waits for the real DDL to complete, and fork time grows with history length. A failed `PENDING` operation must be cleaned up rather than left as a valid changeset.
 
 ---
 
 ### 5. Every schema object carries a stable identity that survives a rename
 
-*Landed: Aug 20 — `6609da5` "detect rename conflict; squashes the drop and readd". The commit that
-stopped a rename reading as a drop plus an add.*
+*Landed: Aug 20 — `6609da5` "detect rename conflict; squashes the drop and readd". The commit that stopped a rename reading as a drop plus an add.*
 
-**Context.** Every tool that compares two schemas by name sees `RENAME COLUMN` as one column
-vanishing and an unrelated one appearing — and will "helpfully" apply it that way, dropping the
-data. Matching by name cannot represent the one thing a rename *is*: the same object, moved.
+**Context.** Comparing schemas by name makes `RENAME COLUMN` look like one column disappearing and another appearing. That loses the fact that it is the same object and can lead to dropping data.
 
-**Decision.** A `StableId` is assigned when a column is created and carried through a rename —
-`TableModel.renameColumn` delegates to `ColumnModel.renamedTo`, which keeps the id and swaps only
-the name. Constraints and indexes hold the stable ids of the columns they cover rather than those
-columns' names. Tables get the same treatment, `TableModel.renamedTo` carrying a table's own id
-across an `ALTER TABLE … RENAME TO`; and because a column's id derives from its table's id
-(`StableId.forColumn(tableId, name)`), every column, constraint and index the table carries survives
-the rename for free. `DatabaseDiff` matches tables by id rather than by name. One deliberate
-exception: a table's own `differsFrom` compares **only the name**, narrower than the general rule.
-Identity also requires that two spellings compare equal, so case folds in opposite directions —
-identifiers to lower case, type names to upper case, and `DEFAULT` values not at all.
+**Decision.** Every table and column gets a stable identity that survives renames. A column rename keeps its `StableId` and changes only its name; a table rename does the same. Constraints and indexes reference column identities rather than names, so they automatically survive column renames.
 
-**Why.** None of this is cosmetic: it is what lets an index survive a rename of the column it
-covers, and what makes "one side renamed it while the other retyped it" detectable as a genuine
-conflict rather than two unrelated objects a merge would cheerfully produce both of. Matching tables
-by id is a strict superset of name-matching for any table that was never renamed, so nothing is
-lost. The narrow table comparison exists because two branches adding *different* columns to the same
-table have both "changed the table" in the everyday sense — and if that counted, `SideChanges` would
-call it a table-level conflict and refuse a merge that works perfectly well; what the contents did
-is already reported member by member by `TableDiff`, so the table's own identity is a separate,
-narrower question. Case folds up for types because a type is compared as a plain string by
-`ColumnModel.sameDefinitionAs`, and without folding `varchar(100)` and `VARCHAR(100)` read as two
-different definitions — so a branch that compensated a retype back to the shared type in a different
-case still counted as having changed the column, and the conflict outlived the very statement
-written to resolve it. Identifiers fold down because that is what an unquoted identifier does in
-PostgreSQL. Defaults are left alone because a default can be a string literal, where case is data
-rather than syntax.
+For example:
 
-**Rejected.** *Name matching*, with a rename read as a drop plus an add — the behaviour every
-schema-compare tool has, and the one that silently destroys a column's data on apply. *A table
-`differsFrom` that compares contents* — it would turn ordinary parallel work on one table into a
-table-level conflict.
+```text
+Before:
+users
+  id        → StableId C1
+  full_name → StableId C2
+  index     → references C2
 
-**Cost.** Constraints and indexes have no identity of their own beyond their name, so renaming one
-still reads as a drop plus an add. It is the same mechanism applied once more, unbuilt rather than
-impossible, and it is listed in §4 rather than quietly omitted.
+RENAME COLUMN full_name TO name
+
+After:
+users
+  id   → StableId C1
+  name → StableId C2
+  index → still references C2
+  
+So the diff is:
+
+C2: full_name → name
+
+rather than:
+
+DROP full_name
+ADD name
+DROP index
+ADD index
+```
+DatabaseDiff similarly matches tables by identity rather than name. Identity comparison also normalizes identifiers and type names (lowercase identifiers, UPPERCASE types) while leaving defaults unchanged, since default values can contain case-sensitive data.
+One deliberate exception: a table's differsFrom compares only its name, not its contents. 
+
+**Why.** Stable identity is what allows dbgit to distinguish a rename from a drop + add and detect conflicts on the same schema object.
+
+```text
+For example:
+
+main:
+  user.email → C2
+
+branch A:
+  RENAME email TO contact_email   → C2
+
+branch B:
+  ALTER email TYPE VARCHAR(500)   → C2
+
+Both branches modify the same object C2, so merge can detect a genuine conflict:
+
+C2:
+  rename: email → contact_email
+  retype: VARCHAR(255) → VARCHAR(500)
+  
+```
+Without stable identity, the merge would see email disappearing on one side and contact_email appearing, while the other side modifies email — making the relationship between the changes impossible to determine reliably.
+The narrower table comparison prevents independent changes to the same table from becoming false table-level conflicts. Member-level changes are already captured by TableDiff.
+
+**Rejected.** Name matching — treats renames as drop + add and can destroy data. Table content comparison for differsFrom — turns harmless parallel changes to the same table into conflicts.
+
+**Cost.** Constraints and indexes themselves do not have stable identities, so renaming one still appears as drop + add. Extending stable identity to them is possible but was left for later.
 
 ---
 
