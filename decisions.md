@@ -420,16 +420,19 @@ pointer — and lets a merge bring in work from a branch that has since been del
 line is then the only thing distinguishing a branch's own work from what it inherited, and it
 carries no foreign key because a finished branch is deleted while its commits must stay.
 
-Auto-rollback is absent for three reasons, the first of which settles it alone. **DDL has no
-reliable inverse**: the inverse of `DROP COLUMN total` looks like `ADD COLUMN total NUMERIC(10,2)`
+Auto-rollback is absent for three reasons, the first of which settles it alone.
+
+**DDL has no reliable inverse**: the inverse of `DROP COLUMN total` looks like `ADD COLUMN total NUMERIC(10,2)`
 and is not, since that restores the column and not one row of the data — and narrowing a type
 truncates every longer value, so retyping back restores the declaration while the characters stay
 gone. An undo that silently restores structure over destroyed data is worse than no undo, because
 the schema then claims a state the data does not support and every later diff agrees with the claim.
+
 **Transactional DDL is not portable**, and multi-vendor was a day-one commitment: PostgreSQL rolls a
 failed replay back cleanly, MySQL forces an implicit commit and leaves it half-applied, and H2 does
-the same — so the promise would be true on one of three supported vendors. **And the rebuild
-primitive already exists**: because the recorded history is the source of truth, "go back" means
+the same — so the promise would be true on one of three supported vendors. 
+
+**And the rebuild  primitive already exists**: because the recorded history is the source of truth, "go back" means
 truncate the history and replay it, which behaves identically everywhere. The rehearsal exists
 because the replay into the target cannot be rolled back on every engine, so it must not be the
 first place the incoming statements are tried; the nonce is not decoration, since the name was once
