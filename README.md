@@ -64,6 +64,10 @@ in the PostgreSQL/MySQL you already run.
 - **Branch mutations are lock-serialized.** A fixed lock order means even two merges going opposite
   directions can't deadlock or corrupt anything.
 
+Each of these is a decision with an argument behind it — what it rules out, and what it costs.
+[`decisions.md`](decisions.md) records all thirty, along with the problem statement, what's in and out
+of scope, and the known limitations.
+
 ## How it works
 
 One daemon (`dbService`) serves every client — the CLI and a browser, via a thin HTTP relay — over a
@@ -73,6 +77,8 @@ replay (what `add` validates against, what `diff`/`merge` compare) and a real wr
 metadata store and to the branch's actual database.
 
 Diagrams and a full request-by-request walkthrough: [`docs/architecture.md`](docs/architecture.md).
+Where each piece lives in the source, and a reading path through it:
+[`docs/code-map.md`](docs/code-map.md).
 
 ## What's supported
 
@@ -120,8 +126,9 @@ echo "ALTER TABLE orders ADD COLUMN total NUMERIC(10,2);" | ./dbgit add
 
 A PostgreSQL server for the metadata store must already be reachable (configured under `metadata` in
 `src/main/resources/dbgit.json`); Docker must be running if `branchDatabases.dialect` is `postgresql`
-or `mysql`. `mvn test` runs unit tests; `mvn test -Dtest='*IntegrationTest'` adds integration tests
-(needs Docker).
+or `mysql`. `mvn test` runs the 246 unit tests; `mvn test -Dtest='*IntegrationTest'` adds 61
+integration tests, which skip rather than fail if Docker is absent. What each layer is actually there
+to catch — and what is deliberately not tested — is in [`docs/testing.md`](docs/testing.md).
 
 `scripts/smoke-tests/` has end-to-end scripts you can run against a live daemon; `scripts/live-demo-eof.sh`
 is a full story — two branches diverging, a merge, a conflict resolved two ways — meant to be watched

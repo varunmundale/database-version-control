@@ -96,4 +96,8 @@ The remaining commands are the same two effects in different order:
   the working set; only then — the one step that can't be transactional — does it drop and rebuild the
   real branch database from that same truncated history.
 
+Why it is shaped this way — the daemon holding no per-user state (decision 3), locks taken per branch and in
+a fixed order (decision 8), the metadata store as system of record (decision 1) — is argued in
+[`decisions.md`](../decisions.md).
+
 ← [back to README](../README.md)

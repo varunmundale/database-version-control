@@ -51,4 +51,3 @@ logs/
 .dbgit-tmp/
 ### live-demo scratch state (scripts/live-demo-concurrency.sh) ###
 *.tmp
-decisions.md

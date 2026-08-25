@@ -100,4 +100,8 @@ These are the seams the design already has. Each is a small, local change:
   every FK added before its target is ever renamed, but one added after a rename won't derive the
   target's real id.
 
+Why the accepted set is a strict whitelist, and why anything unmodellable is refused rather than
+silently ignored, is argued as decision 10 in [`decisions.md`](../decisions.md); the dialect-as-data split
+behind the per-vendor differences above is decision 1.
+
 ← [back to README](../README.md)
